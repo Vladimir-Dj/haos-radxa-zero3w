@@ -56,6 +56,9 @@ jobs:
           git clone -q https://github.com/radxa-pkg/aic8800.git "${RUNNER_TEMP}/aic8800"
           cd "${RUNNER_TEMP}/aic8800"
           git checkout -q "${VER}"
+          sed -i 's/\r$//' \
+            src/USB/driver_fw/drivers/aic8800/aic_load_fw/aicbluetooth.c \
+            src/USB/driver_fw/drivers/aic8800/aic_load_fw/aic_bluetooth_main.c
           while read -r p _; do
             case "$p" in ''|\#*) continue ;; esac
             echo "Applying debian/patches/$p"

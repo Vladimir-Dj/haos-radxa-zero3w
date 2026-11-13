@@ -15,7 +15,14 @@ AIC8800_MODULE_MAKE_OPTS = CONFIG_AIC8800_BTLPM_SUPPORT=n
 
 # Radxa keeps its kernel compatibility and firmware path fixes as a quilt
 # series in debian/patches - apply it the same way the Debian package does.
+# Two files are stored with CRLF line endings; Radxa runs dos2unix on them
+# before applying the series (see .github/local/Makefile.local upstream).
+AIC8800_CRLF_FILES = \
+	src/USB/driver_fw/drivers/aic8800/aic_load_fw/aicbluetooth.c \
+	src/USB/driver_fw/drivers/aic8800/aic_load_fw/aic_bluetooth_main.c
+
 define AIC8800_APPLY_DEBIAN_PATCHES
+	cd $(@D) && sed -i 's/\r$$//' $(AIC8800_CRLF_FILES)
 	while read -r p _; do \
 		case "$$p" in ''|\#*) continue ;; esac; \
 		echo "Applying debian/patches/$$p"; \
