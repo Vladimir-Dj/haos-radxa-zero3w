@@ -8,11 +8,12 @@ on:
 
 jobs:
   build:
+    if: github.repository == 'home-assistant/operating-system'
     name: Build OVA
     # Fork PRs get a read-only token and can't push the builder image.
     # Renovate adds labels after opening the PR, so a newly opened PR gets its build from the labeled event.
     if: >-
-      github.event.pull_request.head.repo.full_name == github.repository && (
+      github.repository == 'home-assistant/operating-system' && github.event.pull_request.head.repo.full_name == github.repository && (
       (github.event.action == 'labeled' && github.event.label.name == 'run-ova-test') ||
       (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'run-ova-test')))
     permissions:

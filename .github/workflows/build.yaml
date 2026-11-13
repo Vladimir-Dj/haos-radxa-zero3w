@@ -60,6 +60,7 @@ env:
 
 jobs:
   prepare:
+    if: github.repository == 'home-assistant/operating-system'
     name: Prepare build
     runs-on: ubuntu-22.04
     permissions:
