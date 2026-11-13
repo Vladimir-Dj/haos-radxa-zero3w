@@ -1,0 +1,8 @@
+config BR2_PACKAGE_AIC8800
+	bool "AICsemi AIC8800 SDIO WiFi"
+	depends on BR2_LINUX_KERNEL
+	help
+	  Out-of-tree driver and firmware for AICsemi AIC8800 family
+	  SDIO WiFi chips (e.g. on Radxa ZERO 3W), as packaged by Radxa.
+
+	  https://github.com/radxa-pkg/aic8800

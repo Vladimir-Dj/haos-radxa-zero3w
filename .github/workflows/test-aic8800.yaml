@@ -1,0 +1,74 @@
+# Community fork workflow (Vladimir-Dj/haos-radxa-zero3w)
+# Quick compile test of the AIC8800 SDIO WiFi driver against the HAOS kernel
+# (same version and config fragments as the Radxa ZERO 3W build), ~15 min
+# instead of a full image build.
+
+name: Test AIC8800 driver build
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - buildroot-external/package/aic8800/**
+      - .github/workflows/test-aic8800.yaml
+
+permissions:
+  contents: read
+
+jobs:
+  build-module:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install cross toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-aarch64-linux-gnu flex bison bc libssl-dev libelf-dev
+
+      - name: Prepare HAOS kernel tree
+        run: |
+          set -euo pipefail
+          DEFCONFIG=buildroot-external/configs/radxa_zero3w_defconfig
+          KVER=$(sed -n 's/^BR2_LINUX_KERNEL_CUSTOM_VERSION_VALUE="\(.*\)"/\1/p' "${DEFCONFIG}")
+          EXT="${GITHUB_WORKSPACE}/buildroot-external"
+          BASE=$(sed -n 's/^BR2_LINUX_KERNEL_CUSTOM_CONFIG_FILE="\(.*\)"/\1/p' "${DEFCONFIG}")
+          FRAGS=$(sed -n 's/^BR2_LINUX_KERNEL_CONFIG_FRAGMENT_FILES="\(.*\)"/\1/p' "${DEFCONFIG}")
+          BASE=${BASE//\$(BR2_EXTERNAL_HAOS_PATH)/$EXT}
+          FRAGS=${FRAGS//\$(BR2_EXTERNAL_HAOS_PATH)/$EXT}
+          echo "Kernel ${KVER}"
+          curl -fsSL "https://cdn.kernel.org/pub/linux/kernel/v${KVER%%.*}.x/linux-${KVER}.tar.xz" | tar -xJ -C "${RUNNER_TEMP}"
+          cd "${RUNNER_TEMP}/linux-${KVER}"
+          cp "${BASE}" .config
+          ARCH=arm64 scripts/kconfig/merge_config.sh -m .config ${FRAGS}
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+          make ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j"$(nproc)" modules_prepare
+          echo "KDIR=${PWD}" >> "${GITHUB_ENV}"
+
+      - name: Fetch and patch driver (same steps as aic8800.mk)
+        run: |
+          set -euo pipefail
+          VER=$(sed -n 's/^AIC8800_VERSION = //p' buildroot-external/package/aic8800/aic8800.mk)
+          git clone -q https://github.com/radxa-pkg/aic8800.git "${RUNNER_TEMP}/aic8800"
+          cd "${RUNNER_TEMP}/aic8800"
+          git checkout -q "${VER}"
+          while read -r p _; do
+            case "$p" in ''|\#*) continue ;; esac
+            echo "Applying debian/patches/$p"
+            patch -p1 -N --no-backup-if-mismatch < "debian/patches/$p"
+          done < debian/patches/series
+
+      - name: Build modules
+        run: |
+          cd "${RUNNER_TEMP}/aic8800/src/SDIO/driver_fw/driver/aic8800"
+          make -C "${KDIR}" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- \
+            KBUILD_MODPOST_WARN=1 CONFIG_AIC8800_BTLPM_SUPPORT=n \
+            M="${PWD}" -j"$(nproc)" modules
+          find . -name '*.ko' -exec ls -l {} \;
+          for m in aic8800_bsp/aic8800_bsp.ko aic8800_fdrv/aic8800_fdrv.ko; do
+            test -f "$m" || { echo "::error::$m was not built"; exit 1; }
+          done
