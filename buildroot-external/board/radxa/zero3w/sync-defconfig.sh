@@ -14,11 +14,14 @@ sed -e 's#board/hardkernel/odroid-m1s#board/radxa/zero3w#g' \
     -e 's#^BR2_PACKAGE_OS_AGENT_BOARD=.*#BR2_PACKAGE_OS_AGENT_BOARD="GenericAarch64"#' \
     "${SRC}" > "${DST}"
 
+# Board specific packages (not in the M1S defconfig)
+echo 'BR2_PACKAGE_AIC8800=y' >> "${DST}"
+
 if grep -n 'odroid-m1s\|odroid_m1s\|OdroidM1S' "${DST}"; then
     echo "ERROR: leftover ODROID-M1S references in ${DST}" >&2
     exit 1
 fi
-for want in 'board/radxa/zero3w' 'rk3566-radxa-zero-3w' '"radxa-zero-3-rk3566"'; do
+for want in 'board/radxa/zero3w' 'rk3566-radxa-zero-3w' '"radxa-zero-3-rk3566"' 'BR2_PACKAGE_AIC8800=y'; do
     grep -q "${want}" "${DST}" || { echo "ERROR: '${want}' missing in ${DST}" >&2; exit 1; }
 done
 
