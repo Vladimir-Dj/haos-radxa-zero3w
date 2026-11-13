@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+Subject: [PATCH] arm64: dts: rockchip: Select on-board WiFi antenna on Radxa ZERO 3W
+
+The board routes the WiFi antenna through an RF switch controlled by
+GPIO3_D3 (on-board PCB antenna) and GPIO3_D2 (external U.FL connector).
+Radxa's vendor device tree drives GPIO3_D3 low at boot; mainline leaves
+both pins unconfigured, so the switch floats and the radio ends up on the
+normally unpopulated U.FL socket.  The AIC8800 then scans every channel
+and completes the scan normally, but never receives a beacon, which looks
+like a broken driver rather than a dead antenna path.
+
+Hog GPIO3_D3 low so the on-board antenna is selected, matching the vendor
+default.  Verified on a Radxa ZERO 3W: with the pin driven low a scan
+immediately returns the surrounding networks.
+---
+--- a/arch/arm64/boot/dts/rockchip/rk3566-radxa-zero-3w.dts	2026-11-13 21:18:11.768093944 +0200
++++ b/arch/arm64/boot/dts/rockchip/rk3566-radxa-zero-3w.dts	2026-11-13 21:18:22.259880169 +0200
+@@ -26,6 +26,24 @@
+ 	};
+ };
+ 
++&gpio3 {
++	/*
++	 * The WiFi antenna is routed through an RF switch.  Radxa's vendor
++	 * device tree drives GPIO3_D3 low to select the on-board PCB antenna,
++	 * while their "external antenna" overlay drives GPIO3_D2 instead to
++	 * select the U.FL connector.  Mainline configures neither pin, so the
++	 * switch is left floating on the usually unpopulated U.FL socket: the
++	 * AIC8800 then scans every channel and completes normally, but never
++	 * receives a single beacon.
++	 */
++	wifi_antenna_hog: wifi-antenna-hog {
++		gpio-hog;
++		gpios = <RK_PD3 GPIO_ACTIVE_HIGH>;
++		output-low;
++		line-name = "wifi-antenna-onboard";
++	};
++};
++
+ &pinctrl {
+ 	bluetooth {
+ 		bt_reg_on_h: bt-reg-on-h {

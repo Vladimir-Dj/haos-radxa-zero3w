@@ -14,9 +14,16 @@ same mainline U-Boot and Linux kernel). Only the board specific parts differ:
 
 ## Known limitations
 
-* **On-board WiFi/Bluetooth (AICsemi AIC8800) are not supported** - there is no
-  driver in the HAOS kernel. Use a **USB Ethernet adapter** (RTL8152/8153, ASIX
-  AX88179, CDC-NCM - all included) on the USB 3.0 host port.
+* **On-board WiFi (AICsemi AIC8800) is supported** - the out-of-tree driver is
+  built from `buildroot-external/package/aic8800` and its firmware is installed
+  into `/lib/firmware/aic8800_fw/SDIO/`. The board's RF switch is hogged to the
+  on-board PCB antenna by a device tree patch (`patches/linux/0002-*`); without
+  it the chip scans every channel and completes normally, but never receives a
+  beacon, which looks exactly like a broken driver.
+* **On-board Bluetooth is not supported** - only the WiFi modules
+  (`aic8800_bsp`, `aic8800_fdrv`) are built, `aic8800_btlpm` is disabled.
+* A **USB Ethernet adapter** (RTL8152/8153, ASIX AX88179, CDC-NCM - all
+  included) on the USB 3.0 host port also works.
 * OS updates are **not** delivered by the official Home Assistant servers (the OTA
   URL is per board). Home Assistant Core, Supervisor and add-ons update normally.
 * Boot medium is the micro SD card. Use an A2 / "High Endurance" card.
