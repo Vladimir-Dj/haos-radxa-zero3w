@@ -1,3 +1,6 @@
+> **Community fork:** Home Assistant OS for **Radxa ZERO 3W** (RK3566), based on the official ODROID-M1S board.
+> Not affiliated with Home Assistant. See [Documentation/radxa-zero3w.md](Documentation/radxa-zero3w.md).
+
 # Home Assistant Operating System
 
 Home Assistant Operating System (formerly HassOS) is a Linux based operating system optimized to host [Home Assistant](https://www.home-assistant.io) and its [Apps](https://www.home-assistant.io/apps/).
