@@ -8,6 +8,7 @@ on:
 
 jobs:
   update_release_draft:
+    if: github.repository == 'home-assistant/operating-system'
     permissions:
       contents: write  # for release-drafter/release-drafter to create a github release
       pull-requests: read  # for release-drafter/release-drafter to read PR content and labels

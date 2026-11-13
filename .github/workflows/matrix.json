@@ -48,6 +48,12 @@
     "label": "board/odroid"
   },
   {
+    "id": "radxa-zero3w",
+    "defconfig": "radxa_zero3w",
+    "architecture": "aarch64",
+    "label": "board/radxa"
+  },
+  {
     "id": "odroid-n2",
     "defconfig": "odroid_n2",
     "architecture": "aarch64",

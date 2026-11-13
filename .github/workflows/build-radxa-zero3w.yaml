@@ -1,0 +1,127 @@
+# Build Home Assistant OS for Radxa ZERO 3W (community fork).
+#
+# Required repository secrets (generate once, keep them forever - every
+# installed system trusts only this certificate for OS updates):
+#   RAUC_CERT_PEM - full PEM certificate (-----BEGIN CERTIFICATE----- ...)
+#   RAUC_KEY_PEM  - full PEM private key  (-----BEGIN PRIVATE KEY----- ...)
+#
+# Triggers:
+#   - manual run (workflow_dispatch): artifacts are attached to the run
+#   - publishing a GitHub release: image + RAUC bundle are uploaded to it
+
+name: Build Radxa ZERO 3W
+
+on:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-radxa-zero3w-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  BOARD_ID: radxa-zero3w
+  DEFCONFIG: radxa_zero3w
+
+jobs:
+  build:
+    name: Build ${{ github.event.release.tag_name || github.ref_name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+          persist-credentials: false
+
+      - name: Sync defconfig with upstream ODROID-M1S
+        run: bash buildroot-external/board/radxa/zero3w/sync-defconfig.sh
+
+      - name: Free space on build drive
+        run: |
+          sudo rm -rf /usr/local/lib/android /opt/hostedtoolcache/CodeQL /usr/share/dotnet /opt/ghc
+          sudo mkdir -p /mnt/cache /mnt/output
+          OWNER="$(stat -c '%U:%G' "${GITHUB_WORKSPACE}")"
+          sudo ln -sf /mnt/output "${GITHUB_WORKSPACE}/output"
+          sudo chown -R "${OWNER}" /mnt/cache /mnt/output
+          df -h
+
+      - name: Write RAUC signing key
+        env:
+          RAUC_CERT_PEM: ${{ secrets.RAUC_CERT_PEM }}
+          RAUC_KEY_PEM: ${{ secrets.RAUC_KEY_PEM }}
+        run: |
+          if [ -z "${RAUC_CERT_PEM}" ] || [ -z "${RAUC_KEY_PEM}" ]; then
+            echo "::error::Secrets RAUC_CERT_PEM / RAUC_KEY_PEM are missing. See Documentation/radxa-zero3w.md"
+            exit 1
+          fi
+          printf '%s\n' "${RAUC_CERT_PEM}" > cert.pem
+          printf '%s\n' "${RAUC_KEY_PEM}" > key.pem
+          chmod 600 key.pem
+          openssl x509 -in cert.pem -noout -subject -enddate
+
+      - name: Build HAOS builder image
+        run: docker build -t haos-builder .
+
+      - name: "Restore cache: object files"
+        uses: actions/cache/restore@v4
+        with:
+          path: /mnt/cache/cc
+          key: haos-cc-${{ env.BOARD_ID }}-${{ github.run_id }}
+          restore-keys: haos-cc-${{ env.BOARD_ID }}-
+
+      - name: Generate build config
+        run: |
+          docker run --rm --privileged \
+            -e BUILDER_UID="$(id -u)" -e BUILDER_GID="$(id -g)" \
+            -v "${GITHUB_WORKSPACE}:/build" -v /mnt/cache:/cache -v /mnt/output:/build/output \
+            haos-builder make ${DEFCONFIG}_defconfig
+
+      - name: Build
+        run: |
+          docker run --rm --privileged \
+            -e BUILDER_UID="$(id -u)" -e BUILDER_GID="$(id -g)" \
+            -v "${GITHUB_WORKSPACE}:/build" -v /mnt/cache:/cache -v /mnt/output:/build/output \
+            haos-builder make
+
+      - name: "Save cache: object files"
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: /mnt/cache/cc
+          key: haos-cc-${{ env.BOARD_ID }}-${{ github.run_id }}
+
+      - name: Remove signing key
+        if: always()
+        run: rm -f key.pem
+
+      - name: Compute image digests
+        working-directory: output/images/
+        run: |
+          ls -lh haos_*
+          sha256sum haos_* > SHA256SUMS.${BOARD_ID}
+          cat SHA256SUMS.${BOARD_ID}
+
+      - name: Upload artifacts to the run
+        uses: actions/upload-artifact@v4
+        with:
+          name: haos_${{ env.BOARD_ID }}
+          path: |
+            output/images/haos_*.img.xz
+            output/images/haos_*.raucb
+            output/images/SHA256SUMS.*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload release assets
+        if: ${{ github.event_name == 'release' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        working-directory: output/images/
+        run: gh release upload "${TAG}" haos_*.img.xz haos_*.raucb SHA256SUMS.* --clobber --repo "${GITHUB_REPOSITORY}"

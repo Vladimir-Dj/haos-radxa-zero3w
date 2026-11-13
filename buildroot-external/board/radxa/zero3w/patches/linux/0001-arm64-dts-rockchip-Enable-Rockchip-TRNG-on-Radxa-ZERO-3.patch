@@ -1,0 +1,19 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+Subject: [PATCH] arm64: dts: rockchip: Enable Rockchip TRNG on Radxa ZERO 3
+
+rk356x.dtsi enables the TRNG only for RK3568. Enable it also for the
+RK3566 based Radxa ZERO 3W/3E (same as the HAOS ODROID-M1S patch).
+---
+--- a/arch/arm64/boot/dts/rockchip/rk3566-radxa-zero-3.dtsi	2026-11-13 00:38:07.650694376 +0200
++++ b/arch/arm64/boot/dts/rockchip/rk3566-radxa-zero-3.dtsi	2026-11-13 00:38:07.655400286 +0200
+@@ -466,6 +466,10 @@
+ 	status = "okay";
+ };
+ 
++&rng {
++	status = "okay";
++};
++
+ &saradc {
+ 	vref-supply = <&vcca_1v8>;
+ 	status = "okay";

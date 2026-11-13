@@ -8,6 +8,7 @@ on:
 
 jobs:
   stale:
+    if: github.repository == 'home-assistant/operating-system'
     permissions:
       issues: write  # for actions/stale to close stale issues
       pull-requests: write  # for actions/stale to close stale PRs
