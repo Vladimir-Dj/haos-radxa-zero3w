@@ -20,11 +20,14 @@ same mainline U-Boot and Linux kernel). Only the board specific parts differ:
   on-board PCB antenna by a device tree patch (`patches/linux/0002-*`); without
   it the chip scans every channel and completes normally, but never receives a
   beacon, which looks exactly like a broken driver.
-* **PMF is disabled by default** (`etc/NetworkManager/conf.d/99-radxa-zero3w-disable-pmf.conf`).
-  The AIC8800 firmware builds its own association request, so against a
-  WPA2/WPA3 mixed-mode access point the AP deauthenticates during the 4-way
-  handshake with reason 17 (RSN element mismatch). wpa_supplicant reports that
-  as "pre-shared key may be incorrect", which is misleading - the PSK is fine.
+* **NetworkManager is patched not to offer SAE on WPA2 connections**
+  (`patches/network-manager/0002-*`). For `key-mgmt=wpa-psk` NetworkManager
+  also advertises SAE/FT-SAE; the AIC8800 firmware builds its own association
+  request with plain WPA-PSK, the two no longer match, and the access point
+  deauthenticates during the 4-way handshake with reason 17. wpa_supplicant
+  reports that as "pre-shared key may be incorrect", which is misleading - the
+  PSK is fine. Upstream means to suppress this when PMF is disabled, but the
+  test is inverted and only takes effect in AP mode.
 * **On-board Bluetooth is not supported** - only the WiFi modules
   (`aic8800_bsp`, `aic8800_fdrv`) are built, `aic8800_btlpm` is disabled.
 * A **USB Ethernet adapter** (RTL8152/8153, ASIX AX88179, CDC-NCM - all

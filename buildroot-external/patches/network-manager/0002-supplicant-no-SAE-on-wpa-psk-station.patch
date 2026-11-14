@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+Subject: [PATCH] supplicant: do not offer SAE on wpa-psk station connections
+
+For key-mgmt=wpa-psk NetworkManager also advertises SAE/FT-SAE so that an
+existing WPA2 profile keeps working if the AP is later upgraded to WPA3.
+The comment above the test says this must not happen when PMF is disabled,
+but the test reads
+
+    (!is_ap || pmf != NM_SETTING_WIRELESS_SECURITY_PMF_DISABLE)
+
+and !is_ap is true for every station, so SAE is offered regardless of the
+PMF setting.  Disabling PMF therefore only has an effect in AP mode.
+
+That breaks the AIC8800 on the Radxa ZERO 3W.  It is a fullmac part: its
+firmware builds the association request itself and advertises plain
+WPA-PSK, while wpa_supplicant puts the full AKM list in EAPOL message 2.
+The AP sees the two differ and deauthenticates with reason 17, which
+wpa_supplicant reports as "pre-shared key may be incorrect".
+
+Verified on the board: running wpa_supplicant by hand with
+key_mgmt=WPA-PSK, or with "WPA-PSK WPA-PSK-SHA256 FT-PSK", associates and
+completes the 4-way handshake; adding SAE is what fails.
+
+Offer SAE only in AP mode, where the PMF check works as intended.
+---
+--- a/src/core/supplicant/nm-supplicant-config.c	2026-11-14 03:03:07.656660100 +0200
++++ b/src/core/supplicant/nm-supplicant-config.c	2026-11-14 03:03:07.859509300 +0200
+@@ -1009,10 +1009,10 @@
+          * some devices that are not fully compatible with WPA3-Personal
+          * transition mode.
+          */
+-        if (_get_capability(priv, NM_SUPPL_CAP_TYPE_SAE)
++        if (is_ap && _get_capability(priv, NM_SUPPL_CAP_TYPE_SAE)
+             && _get_capability(priv, NM_SUPPL_CAP_TYPE_PMF)
+             && _get_capability(priv, NM_SUPPL_CAP_TYPE_BIP)
+-            && (!is_ap || pmf != NM_SETTING_WIRELESS_SECURITY_PMF_DISABLE)) {
++            && pmf != NM_SETTING_WIRELESS_SECURITY_PMF_DISABLE) {
+             g_string_append(key_mgmt_conf, " SAE");
+             if (!is_ap && _get_capability(priv, NM_SUPPL_CAP_TYPE_FT))
+                 g_string_append(key_mgmt_conf, " FT-SAE");
