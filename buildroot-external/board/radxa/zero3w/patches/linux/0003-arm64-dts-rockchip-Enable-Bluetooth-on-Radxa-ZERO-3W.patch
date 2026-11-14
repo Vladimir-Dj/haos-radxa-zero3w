@@ -14,7 +14,7 @@ numbers match the pinctrl groups mainline already defines.
 
 --- a/arch/arm64/boot/dts/rockchip/rk3566-radxa-zero-3w.dts
 +++ b/arch/arm64/boot/dts/rockchip/rk3566-radxa-zero-3w.dts
-@@ -84,9 +84,24 @@
+@@ -84,9 +84,23 @@
  	status = "okay";
  };
  
