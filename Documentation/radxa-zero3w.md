@@ -82,18 +82,32 @@ whenever `CONFIG/network/` exists, and it *removes* an installed SSH key when a
   reports that as "pre-shared key may be incorrect", which is misleading - the
   PSK is fine. Upstream means to suppress this when PMF is disabled, but the
   test is inverted and only takes effect in AP mode.
-* **On-board Bluetooth** is driven through the ordinary mainline serdev
-  binding. The AIC8800 is a combo part: WiFi over SDIO, Bluetooth as H4 on
-  `uart1`. Mainline enables `uart1` and declares the three Bluetooth control
-  pins, but attaches no device to them, so a device tree patch
-  (`patches/linux/0003-*`) adds the `bluetooth` node - declared, as in Radxa's
-  own vendor tree, with the `brcm,bcm43438-bt` compatible. No Broadcom
-  firmware is downloaded: the AIC8800 speaks the same H4 dialect and its BT
-  firmware arrives over SDIO from `aic8800_bsp`. That SDIO-side push is
-  guarded upstream by `CONFIG_PLATFORM_ROCKCHIP`, which would also pull in
-  `-DANDROID_PLATFORM`, so `patches/aic8800/0001-*` drops the guard instead.
-  The vendor `aic8800_btlpm` module stays disabled - it only adds an rfkill
-  switch around the same call.
+* **On-board Bluetooth** is attached from userspace, not from the device tree.
+  The AIC8800 is a combo part: WiFi over SDIO, Bluetooth as H4 on `uart1`.
+  Two pieces are needed.
+
+  First, the chip's Bluetooth core has to be powered and given its firmware over
+  SDIO. Upstream only does that under `CONFIG_PLATFORM_ROCKCHIP`, a profile that
+  also defines `ANDROID_PLATFORM` and hard-codes the upstream author's toolchain
+  paths, so `patches/aic8800/0001-*` drops the guard instead. Confirmed on
+  hardware: without it the boot log shows only
+  `aicbsp_set_subsys, subsys: AIC_WIFI`, with it `AIC_BLUETOOTH` appears too.
+
+  Second, something has to speak HCI on the UART. `aic8800-bt.service` runs
+  `btattach -B /dev/ttyS1 -P h4 -S 1500000`. Plain H4, no vendor setup: the
+  firmware has already configured its own UART from the patch table
+  (`uart_baud 1500000`, `uart_flowctrl 1`, `btmode 5`), so there is nothing to
+  negotiate.
+
+  Do **not** declare a `bluetooth` child node under `&uart1` the way Radxa's
+  vendor tree does, with `compatible = "brcm,bcm43438-bt"`. That was tried and
+  fails on mainline: the kernel binds `btbcm`, which opens the link with the
+  Broadcom vendor command `0xfc18` ("update baud rate"), the AIC8800 does not
+  answer it, and `hci0` registers but stays `DOWN` with
+  `BCM: Reset failed (-110)`. It presumably works on Radxa's 5.10 BSP because
+  Rockchip carry a more permissive `hci_uart`. The node also consumes the serial
+  port, so `/dev/ttyS1` disappears and `btattach` has nothing to attach to.
+
 * A **USB Ethernet adapter** (RTL8152/8153, ASIX AX88179, CDC-NCM - all
   included) on the USB 3.0 host port also works.
 * OS updates are **not** delivered by the official Home Assistant servers (the OTA

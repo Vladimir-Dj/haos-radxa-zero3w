@@ -1,0 +1,23 @@
+[Unit]
+Description=Attach the AIC8800 Bluetooth controller on uart1
+Documentation=https://github.com/Vladimir-Dj/haos-radxa-zero3w
+# aic8800_bsp must have powered the Bluetooth subsystem and pushed its firmware
+# over SDIO first; it is loaded by systemd-modules-load from modules-load.d.
+After=systemd-modules-load.service
+ConditionPathExists=/dev/ttyS1
+
+[Service]
+# btattach stays in the foreground for as long as the HCI device exists.
+#
+# Plain H4 with no vendor setup: the firmware has already configured its own
+# UART from the patch table (uart_baud 1500000, uart_flowctrl 1, btmode 5), so
+# there is no baud rate to negotiate. Declaring the chip in the device tree as
+# a bcm43438 instead - the way Radxa's vendor tree does - makes mainline load
+# btbcm, which opens with the Broadcom vendor command 0xfc18 and times out.
+Type=simple
+ExecStart=/usr/bin/btattach -B /dev/ttyS1 -P h4 -S 1500000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
