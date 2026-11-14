@@ -1,1 +1,1 @@
-console=ttyS2,1500000 console=tty0
+console=ttyS2,1500000 console=tty0 cpufreq.default_governor=schedutil
