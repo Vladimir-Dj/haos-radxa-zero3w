@@ -1,28 +1,32 @@
 #!/bin/sh
 #
-# wifi-setup - configure WiFi on Home Assistant OS without typing long commands.
+# wifi-setup - first-time setup for Home Assistant OS without typing long
+# commands: WiFi networks and, optionally, a root password for SSH.
 #
-# Interactive:  wifi-setup
-#     Asks for a primary and an optional backup network, writes the answers to
-#     /mnt/boot/wifi.conf (the FAT boot partition of the SD card, readable from
-#     any PC) and installs the matching NetworkManager profiles.
+# Interactive:   wifi-setup
+#     Asks for a primary and an optional backup network plus an optional SSH
+#     password, installs the NetworkManager profiles and saves the network
+#     settings to /mnt/boot/wifi.conf - the FAT boot partition of the SD card,
+#     which mounts on any PC.
 #
-# At boot:      wifi-setup --apply
-#     Re-reads /mnt/boot/wifi.conf and reinstalls the profiles if it changed,
-#     so the card can be reconfigured by editing one file on a PC.
+# Change SSH:    wifi-setup --ssh-password
+# At boot:       wifi-setup --apply
+# Show:          wifi-setup --show
 #
-# Show:         wifi-setup --show
+# wifi.conf may also carry ssh_password=... so a card can be prepared entirely
+# from a PC. It is applied once and then removed from the file.
 #
-# The profiles live in /etc/NetworkManager/system-connections, which is a bind
-# mount from the data partition - so they survive reboots and OS updates. The
-# PSK is stored there in clear text, exactly as NetworkManager always does, and
-# a copy is kept in wifi.conf so the network can be changed from a PC.
+# The WiFi profiles live in /etc/NetworkManager/system-connections and the root
+# password in /etc/shadow; both are bind mounts from the overlay partition, so
+# they survive reboots and OS updates. The PSK is stored in clear text there,
+# exactly as NetworkManager always does.
 
 set -eu
 
 BOOT_CONF="/mnt/boot/wifi.conf"
 NM_DIR="/etc/NetworkManager/system-connections"
 STAMP="/var/lib/wifi-setup.stamp"
+PW_MARKER="/root/.ssh/.password-auth"
 
 die() {
     echo "[Error] $*" >&2
@@ -30,8 +34,7 @@ die() {
 }
 
 wifi_device() {
-    dev=$(nmcli -t -f DEVICE,TYPE device 2>/dev/null \
-          | awk -F: '$2 == "wifi" { print $1; exit }')
+    dev=$(nmcli -t -f DEVICE,TYPE device 2>/dev/null | awk -F: '$2 == "wifi" { print $1; exit }')
     [ -n "${dev}" ] || dev="wlan0"
     echo "${dev}"
 }
@@ -46,6 +49,47 @@ valid_psk() {
     len=$(printf '%s' "$1" | wc -c)
     [ "${len}" -ge 8 ] && [ "${len}" -le 63 ]
 }
+
+##
+# Root password
+
+set_ssh_password() {
+    _pw=$1
+    [ -n "${_pw}" ] || die "refusing to set an empty root password"
+
+    # Feed it on stdin rather than as an argument - arguments are visible in ps.
+    _hash=$(printf '%s\n' "${_pw}" | cryptpw -m sha512) || die "could not hash the password"
+    case "${_hash}" in
+        \$6\$*) : ;;
+        *)      die "unexpected hash format from cryptpw" ;;
+    esac
+    # A colon or whitespace would split the shadow record and lock the account
+    # out, so refuse rather than write a broken /etc/shadow.
+    case "${_hash}" in
+        *:*|*[[:space:]]*) die "refusing to write a malformed hash" ;;
+    esac
+
+    [ -f /etc/shadow ] || die "/etc/shadow is missing"
+    _tmp="/tmp/shadow.$$"
+    awk -v h="${_hash}" 'BEGIN { FS = OFS = ":" } $1 == "root" { $2 = h; found = 1 } { print } END { exit(found ? 0 : 1) }' /etc/shadow > "${_tmp}" || { rm -f "${_tmp}"; die "no root entry in /etc/shadow"; }
+
+    # Write in place. /etc is read-only, so creating a new file and renaming it
+    # over /etc/shadow would fail; the bind mount makes the file itself
+    # writable even though its directory is not.
+    cat "${_tmp}" > /etc/shadow
+    rm -f "${_tmp}"
+    chmod 600 /etc/shadow 2>/dev/null || true
+
+    mkdir -p /root/.ssh
+    echo "enabled" > "${PW_MARKER}"
+    chmod 600 "${PW_MARKER}"
+
+    systemctl restart dropbear >/dev/null 2>&1 || true
+    echo "[Info] Root password set; SSH password login enabled on port 22222"
+}
+
+##
+# Profiles
 
 write_profile() {
     _ssid=$1
@@ -87,28 +131,34 @@ PROFILE
 }
 
 read_conf() {
-    SSID=""; PSK=""; SSID_BACKUP=""; PSK_BACKUP=""
+    SSID=""; PSK=""; SSID_BACKUP=""; PSK_BACKUP=""; SSH_PASSWORD=""
     [ -f "${BOOT_CONF}" ] || return 1
     while IFS='=' read -r key value; do
         key=$(strip_cr "${key}")
         value=$(strip_cr "${value}")
         case "${key}" in
-            ''|\#*)      continue ;;
-            ssid)        SSID=${value} ;;
-            psk)         PSK=${value} ;;
-            ssid_backup) SSID_BACKUP=${value} ;;
-            psk_backup)  PSK_BACKUP=${value} ;;
+            ''|\#*)       continue ;;
+            ssid)         SSID=${value} ;;
+            psk)          PSK=${value} ;;
+            ssid_backup)  SSID_BACKUP=${value} ;;
+            psk_backup)   PSK_BACKUP=${value} ;;
+            ssh_password) SSH_PASSWORD=${value} ;;
         esac
     done < "${BOOT_CONF}"
     [ -n "${SSID}" ]
 }
 
+# Never writes ssh_password back out, so applying one removes it from the card.
 write_conf() {
     ( umask 077 && cat > "${BOOT_CONF}" <<CONF
 # Home Assistant OS WiFi configuration.
 #
 # Edit this file from any PC with the SD card inserted, then reboot the board.
 # Leave the backup network empty if there is only one.
+#
+# Adding a line "ssh_password=secret" sets the root password on the next boot
+# and enables SSH password login on port 22222. The line is removed from this
+# file once it has been applied.
 ssid=${SSID}
 psk=${PSK}
 ssid_backup=${SSID_BACKUP}
@@ -135,9 +185,15 @@ install_profiles() {
 
     nmcli con reload >/dev/null 2>&1 || true
     nmcli con up "${SSID}" >/dev/null 2>&1 || true
+}
+
+stamp() {
     mkdir -p "$(dirname "${STAMP}")"
     md5sum "${BOOT_CONF}" > "${STAMP}" 2>/dev/null || true
 }
+
+##
+# Prompts
 
 ask() {
     printf '%s' "$1"
@@ -158,10 +214,27 @@ ask_secret() {
     REPLY=$(strip_cr "${REPLY}")
 }
 
+prompt_ssh_password() {
+    while :; do
+        ask_secret "New SSH password for root (empty to skip): "
+        _first=${REPLY}
+        [ -n "${_first}" ] || { echo "Skipped."; return 1; }
+        if [ "$(printf '%s' "${_first}" | wc -c)" -lt 8 ]; then
+            echo "Please use at least 8 characters."
+            continue
+        fi
+        ask_secret "Repeat it: "
+        [ "${REPLY}" = "${_first}" ] && break
+        echo "The two entries differ, try again."
+    done
+    SSH_PASSWORD=${_first}
+    return 0
+}
+
 interactive() {
     echo
-    echo "Home Assistant OS - WiFi setup"
-    echo "=============================="
+    echo "Home Assistant OS - first-time setup"
+    echo "===================================="
     echo
 
     while :; do
@@ -192,10 +265,21 @@ interactive() {
     fi
 
     echo
+    echo "SSH gives you a shell on port 22222. Leave the password empty to keep"
+    echo "SSH key-only (put your key in CONFIG/authorized_keys on the SD card)."
+    SSH_PASSWORD=""
+    prompt_ssh_password || true
+
+    echo
     write_conf
     install_profiles
+    stamp
+    if [ -n "${SSH_PASSWORD}" ]; then
+        set_ssh_password "${SSH_PASSWORD}"
+    fi
+
     echo
-    echo "Done. Connecting - check with: nmcli device status"
+    echo "Done. Check the connection with: nmcli device status"
 }
 
 case "${1:-}" in
@@ -206,18 +290,33 @@ case "${1:-}" in
             exit 0
         fi
         install_profiles
+        if [ -n "${SSH_PASSWORD}" ]; then
+            set_ssh_password "${SSH_PASSWORD}"
+            write_conf
+        fi
+        stamp
+        ;;
+    --ssh-password)
+        SSH_PASSWORD=""
+        prompt_ssh_password || exit 0
+        set_ssh_password "${SSH_PASSWORD}"
         ;;
     --show)
         read_conf || die "No ${BOOT_CONF} yet - run wifi-setup first."
         echo "Primary: ${SSID}"
-        [ -n "${SSID_BACKUP}" ] && echo "Backup:  ${SSID_BACKUP}"
-        echo "(passwords not shown; see ${BOOT_CONF})"
-        ;;
-    ''|--help|-h)
-        if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
-            sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
-            exit 0
+        if [ -n "${SSID_BACKUP}" ]; then
+            echo "Backup:  ${SSID_BACKUP}"
         fi
+        if [ -s "${PW_MARKER}" ]; then
+            echo "SSH:     password login enabled on port 22222"
+        else
+            echo "SSH:     key only (no root password set)"
+        fi
+        ;;
+    --help|-h)
+        sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
+        ;;
+    '')
         interactive
         ;;
     *)

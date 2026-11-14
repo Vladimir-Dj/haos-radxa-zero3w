@@ -1,0 +1,18 @@
+#!/bin/sh
+#
+# Start dropbear, allowing password authentication only once a root password
+# has actually been set (wifi-setup --ssh-password leaves the marker behind).
+#
+# Without the marker we keep upstream behaviour and pass -s, which disables
+# password logins entirely.  That matters because the shipped root account has
+# an empty password: dropping -s unconditionally would hand out a root shell.
+
+set -eu
+
+OPTS="-R -E -p 22222"
+
+if [ -s /root/.ssh/.password-auth ]; then
+    exec /usr/sbin/dropbear 
+fi
+
+exec /usr/sbin/dropbear  -s

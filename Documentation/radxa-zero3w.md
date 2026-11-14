@@ -38,9 +38,28 @@ is otherwise invisible and the access point simply rejects the key.
 
 ### SSH
 
-Put your public key in `CONFIG/authorized_keys` on the boot partition.  On the
-next boot `haos-config` installs it and starts dropbear on port 22222, then
-**deletes the whole `CONFIG` folder**.
+Two ways in, both on port 22222.
+
+**With a password.** `wifi-setup` offers to set a root password; afterwards
+`wifi-setup --ssh-password` changes it.  A card can also be prepared entirely
+from a PC by adding `ssh_password=...` to `wifi.conf`; it is applied on the
+next boot and then removed from the file.
+
+There is no default password.  Upstream runs dropbear with `-s`, which refuses
+password logins outright, because the shipped root account has an empty
+password - dropping the flag unconditionally would hand out a root shell.  So
+`haos-dropbear` passes `-s` unless `/root/.ssh/.password-auth` exists, and only
+`set_ssh_password` creates it.
+
+`passwd` cannot be used: `/etc` is read-only, and busybox `passwd` writes a new
+file and renames it over the old one, which touches the directory.  The script
+rewrites the root record in place instead, through the `/etc/shadow` bind mount
+(`etc-shadow.mount`), so the password survives reboots and OS updates.
+
+**With a key.** Put your public key in `CONFIG/authorized_keys` on the boot
+partition.  On the next boot `haos-config` installs it into `/root/.ssh`, which
+is itself a bind mount from the overlay, then **deletes the whole `CONFIG`
+folder**.  The key therefore only has to be copied once.
 
 Two things to watch: `haos-config` wipes `/etc/NetworkManager/system-connections`
 whenever `CONFIG/network/` exists, and it *removes* an installed SSH key when a
