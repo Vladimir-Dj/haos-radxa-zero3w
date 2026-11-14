@@ -113,6 +113,18 @@ whenever `CONFIG/network/` exists, and it *removes* an installed SSH key when a
 * OS updates are **not** delivered by the official Home Assistant servers (the OTA
   URL is per board). Home Assistant Core, Supervisor and add-ons update normally.
 * Boot medium is the micro SD card. Use an A2 / "High Endurance" card.
+* The **CPU frequency governor is `schedutil`**, set on the kernel command line
+  (`cpufreq.default_governor=schedutil` in `cmdline.txt`). Upstream HAOS builds
+  the kernel with `CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE`, which pins all four
+  cores at 1416 MHz permanently. Measured on an idle board, `schedutil` spends
+  92 % of the time at 408 MHz and settles around 54 C, while still reaching full
+  clock within milliseconds when work arrives; the first passive thermal trip
+  point is 70 C. Setting this on the command line rather than from a
+  `tmpfiles.d` rule avoids a race - the governor is in place when the cpufreq
+  driver registers the policy, instead of some time after userspace has started.
+  Note that `cmdline.txt` lives on the `hassos-boot` partition, which **is** a
+  RAUC slot (`[slot.boot.0]`), so an OS update overwrites it: the change has to
+  be in the image to survive an update.
 
 ## 1. One-time setup: RAUC signing key
 
