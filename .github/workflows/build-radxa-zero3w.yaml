@@ -16,7 +16,7 @@ on:
   workflow_dispatch:
   push:
     # Feature branches build automatically (images land in the run artifacts)
-    branches: [aic8800-wifi]
+    branches: [aic8800-wifi, aic8800-bluetooth]
     paths: [buildroot-external/**, .github/workflows/build-radxa-zero3w.yaml]
   release:
     types: [published]

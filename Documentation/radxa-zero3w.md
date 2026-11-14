@@ -28,8 +28,18 @@ same mainline U-Boot and Linux kernel). Only the board specific parts differ:
   reports that as "pre-shared key may be incorrect", which is misleading - the
   PSK is fine. Upstream means to suppress this when PMF is disabled, but the
   test is inverted and only takes effect in AP mode.
-* **On-board Bluetooth is not supported** - only the WiFi modules
-  (`aic8800_bsp`, `aic8800_fdrv`) are built, `aic8800_btlpm` is disabled.
+* **On-board Bluetooth** is driven through the ordinary mainline serdev
+  binding. The AIC8800 is a combo part: WiFi over SDIO, Bluetooth as H4 on
+  `uart1`. Mainline enables `uart1` and declares the three Bluetooth control
+  pins, but attaches no device to them, so a device tree patch
+  (`patches/linux/0003-*`) adds the `bluetooth` node - declared, as in Radxa's
+  own vendor tree, with the `brcm,bcm43438-bt` compatible. No Broadcom
+  firmware is downloaded: the AIC8800 speaks the same H4 dialect and its BT
+  firmware arrives over SDIO from `aic8800_bsp`. That SDIO-side push is
+  guarded upstream by `CONFIG_PLATFORM_ROCKCHIP`, which would also pull in
+  `-DANDROID_PLATFORM`, so `patches/aic8800/0001-*` drops the guard instead.
+  The vendor `aic8800_btlpm` module stays disabled - it only adds an rfkill
+  switch around the same call.
 * A **USB Ethernet adapter** (RTL8152/8153, ASIX AX88179, CDC-NCM - all
   included) on the USB 3.0 host port also works.
 * OS updates are **not** delivered by the official Home Assistant servers (the OTA
