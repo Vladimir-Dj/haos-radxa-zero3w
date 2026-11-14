@@ -1,0 +1,14 @@
+[Unit]
+Description=Apply WiFi configuration from the boot partition
+Documentation=man:wifi-setup(8)
+# haos-config may rewrite system-connections wholesale, so run after it.
+After=haos-config.service NetworkManager.service mnt-boot.mount
+Requires=mnt-boot.mount
+ConditionPathExists=/mnt/boot/wifi.conf
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/wifi-setup --apply
+
+[Install]
+WantedBy=multi-user.target

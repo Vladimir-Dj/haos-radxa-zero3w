@@ -1,0 +1,226 @@
+#!/bin/sh
+#
+# wifi-setup - configure WiFi on Home Assistant OS without typing long commands.
+#
+# Interactive:  wifi-setup
+#     Asks for a primary and an optional backup network, writes the answers to
+#     /mnt/boot/wifi.conf (the FAT boot partition of the SD card, readable from
+#     any PC) and installs the matching NetworkManager profiles.
+#
+# At boot:      wifi-setup --apply
+#     Re-reads /mnt/boot/wifi.conf and reinstalls the profiles if it changed,
+#     so the card can be reconfigured by editing one file on a PC.
+#
+# Show:         wifi-setup --show
+#
+# The profiles live in /etc/NetworkManager/system-connections, which is a bind
+# mount from the data partition - so they survive reboots and OS updates. The
+# PSK is stored there in clear text, exactly as NetworkManager always does, and
+# a copy is kept in wifi.conf so the network can be changed from a PC.
+
+set -eu
+
+BOOT_CONF="/mnt/boot/wifi.conf"
+NM_DIR="/etc/NetworkManager/system-connections"
+STAMP="/var/lib/wifi-setup.stamp"
+
+die() {
+    echo "[Error] $*" >&2
+    exit 1
+}
+
+wifi_device() {
+    dev=$(nmcli -t -f DEVICE,TYPE device 2>/dev/null \
+          | awk -F: '$2 == "wifi" { print $1; exit }')
+    [ -n "${dev}" ] || dev="wlan0"
+    echo "${dev}"
+}
+
+# Strip a trailing CR so a wifi.conf edited on Windows still parses. Without
+# this the CR ends up inside the PSK and the access point rejects the key.
+strip_cr() {
+    printf '%s' "$1" | tr -d '\r'
+}
+
+valid_psk() {
+    len=$(printf '%s' "$1" | wc -c)
+    [ "${len}" -ge 8 ] && [ "${len}" -le 63 ]
+}
+
+write_profile() {
+    _ssid=$1
+    _psk=$2
+    _prio=$3
+    _dev=$(wifi_device)
+    _file="${NM_DIR}/${_ssid}.nmconnection"
+    _uuid=$(cat /proc/sys/kernel/random/uuid)
+
+    ( umask 077 && cat > "${_file}" <<PROFILE
+[connection]
+id=${_ssid}
+uuid=${_uuid}
+type=wifi
+interface-name=${_dev}
+autoconnect=true
+autoconnect-priority=${_prio}
+autoconnect-retries=0
+
+[wifi]
+mode=infrastructure
+ssid=${_ssid}
+
+[wifi-security]
+auth-alg=open
+key-mgmt=wpa-psk
+psk=${_psk}
+
+[ipv4]
+method=auto
+
+[ipv6]
+addr-gen-mode=default
+method=auto
+PROFILE
+    )
+    chmod 600 "${_file}"
+    echo "[Info] Wrote profile for '${_ssid}' (priority ${_prio})"
+}
+
+read_conf() {
+    SSID=""; PSK=""; SSID_BACKUP=""; PSK_BACKUP=""
+    [ -f "${BOOT_CONF}" ] || return 1
+    while IFS='=' read -r key value; do
+        key=$(strip_cr "${key}")
+        value=$(strip_cr "${value}")
+        case "${key}" in
+            ''|\#*)      continue ;;
+            ssid)        SSID=${value} ;;
+            psk)         PSK=${value} ;;
+            ssid_backup) SSID_BACKUP=${value} ;;
+            psk_backup)  PSK_BACKUP=${value} ;;
+        esac
+    done < "${BOOT_CONF}"
+    [ -n "${SSID}" ]
+}
+
+write_conf() {
+    ( umask 077 && cat > "${BOOT_CONF}" <<CONF
+# Home Assistant OS WiFi configuration.
+#
+# Edit this file from any PC with the SD card inserted, then reboot the board.
+# Leave the backup network empty if there is only one.
+ssid=${SSID}
+psk=${PSK}
+ssid_backup=${SSID_BACKUP}
+psk_backup=${PSK_BACKUP}
+CONF
+    )
+    echo "[Info] Saved ${BOOT_CONF}"
+}
+
+install_profiles() {
+    [ -d "${NM_DIR}" ] || die "${NM_DIR} is missing - is NetworkManager installed?"
+
+    # Only remove profiles this script owns, so a connection added by hand or
+    # by the Supervisor is left alone.
+    for f in "${NM_DIR}"/*.nmconnection; do
+        [ -e "${f}" ] || continue
+        grep -q '^autoconnect-retries=0$' "${f}" 2>/dev/null && rm -f "${f}"
+    done
+
+    write_profile "${SSID}" "${PSK}" 100
+    if [ -n "${SSID_BACKUP}" ] && [ -n "${PSK_BACKUP}" ]; then
+        write_profile "${SSID_BACKUP}" "${PSK_BACKUP}" 50
+    fi
+
+    nmcli con reload >/dev/null 2>&1 || true
+    nmcli con up "${SSID}" >/dev/null 2>&1 || true
+    mkdir -p "$(dirname "${STAMP}")"
+    md5sum "${BOOT_CONF}" > "${STAMP}" 2>/dev/null || true
+}
+
+ask() {
+    printf '%s' "$1"
+    IFS= read -r REPLY
+    REPLY=$(strip_cr "${REPLY}")
+}
+
+ask_secret() {
+    printf '%s' "$1"
+    if [ -t 0 ]; then
+        stty -echo 2>/dev/null || true
+        IFS= read -r REPLY
+        stty echo 2>/dev/null || true
+        echo
+    else
+        IFS= read -r REPLY
+    fi
+    REPLY=$(strip_cr "${REPLY}")
+}
+
+interactive() {
+    echo
+    echo "Home Assistant OS - WiFi setup"
+    echo "=============================="
+    echo
+
+    while :; do
+        ask "Primary network name (SSID): "
+        SSID=${REPLY}
+        [ -n "${SSID}" ] && break
+        echo "The SSID cannot be empty."
+    done
+
+    while :; do
+        ask_secret "Password for '${SSID}': "
+        PSK=${REPLY}
+        valid_psk "${PSK}" && break
+        echo "The password must be between 8 and 63 characters."
+    done
+
+    echo
+    ask "Backup network name (SSID), or press Enter to skip: "
+    SSID_BACKUP=${REPLY}
+    PSK_BACKUP=""
+    if [ -n "${SSID_BACKUP}" ]; then
+        while :; do
+            ask_secret "Password for '${SSID_BACKUP}': "
+            PSK_BACKUP=${REPLY}
+            valid_psk "${PSK_BACKUP}" && break
+            echo "The password must be between 8 and 63 characters."
+        done
+    fi
+
+    echo
+    write_conf
+    install_profiles
+    echo
+    echo "Done. Connecting - check with: nmcli device status"
+}
+
+case "${1:-}" in
+    --apply)
+        # Boot-time path: stay quiet and do nothing unless wifi.conf changed.
+        read_conf || exit 0
+        if [ -f "${STAMP}" ] && md5sum -c "${STAMP}" >/dev/null 2>&1; then
+            exit 0
+        fi
+        install_profiles
+        ;;
+    --show)
+        read_conf || die "No ${BOOT_CONF} yet - run wifi-setup first."
+        echo "Primary: ${SSID}"
+        [ -n "${SSID_BACKUP}" ] && echo "Backup:  ${SSID_BACKUP}"
+        echo "(passwords not shown; see ${BOOT_CONF})"
+        ;;
+    ''|--help|-h)
+        if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
+            sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
+            exit 0
+        fi
+        interactive
+        ;;
+    *)
+        die "Unknown option '$1' - try --help"
+        ;;
+esac

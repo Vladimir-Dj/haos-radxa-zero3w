@@ -12,6 +12,41 @@ same mainline U-Boot and Linux kernel). Only the board specific parts differ:
 | Board files | `buildroot-external/board/radxa/zero3w/` |
 | Defconfig | `buildroot-external/configs/radxa_zero3w_defconfig` |
 
+## First-time setup without a keyboard
+
+Everything below is read from the FAT **boot partition of the SD card**
+(`hassos-boot`), which mounts on any PC. No USB stick is needed.
+
+### WiFi
+
+`wifi-setup` asks for a primary and an optional backup network, installs the
+NetworkManager profiles and saves the answers to `/mnt/boot/wifi.conf`:
+
+```
+ha > login
+# wifi-setup
+```
+
+The primary network gets `autoconnect-priority=100` and the backup `50`, so the
+board prefers the primary and falls back on its own.
+
+To change networks later without touching the board, put the card in a PC and
+edit `wifi.conf` on the boot partition; `wifi-setup.service` re-applies it on
+the next boot whenever the file has changed.  Files edited on Windows keep
+their CRLF line endings, so the script strips them - a stray CR inside the PSK
+is otherwise invisible and the access point simply rejects the key.
+
+### SSH
+
+Put your public key in `CONFIG/authorized_keys` on the boot partition.  On the
+next boot `haos-config` installs it and starts dropbear on port 22222, then
+**deletes the whole `CONFIG` folder**.
+
+Two things to watch: `haos-config` wipes `/etc/NetworkManager/system-connections`
+whenever `CONFIG/network/` exists, and it *removes* an installed SSH key when a
+`CONFIG` folder is present without an `authorized_keys` in it.  Prefer
+`wifi-setup` for WiFi and keep `CONFIG` for the SSH key alone.
+
 ## Known limitations
 
 * **On-board WiFi (AICsemi AIC8800) is supported** - the out-of-tree driver is
