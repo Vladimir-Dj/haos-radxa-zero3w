@@ -9,10 +9,8 @@
 
 set -eu
 
-OPTS="-R -E -p 22222"
-
 if [ -s /root/.ssh/.password-auth ]; then
-    exec /usr/sbin/dropbear 
+    exec /usr/sbin/dropbear -R -E -p 22222
 fi
 
-exec /usr/sbin/dropbear  -s
+exec /usr/sbin/dropbear -R -E -p 22222 -s
