@@ -3,3 +3,5 @@ disable apparmor.service
 enable systemd-time-wait-sync.service
 
 enable wifi-setup.service
+
+enable etc-shadow.mount

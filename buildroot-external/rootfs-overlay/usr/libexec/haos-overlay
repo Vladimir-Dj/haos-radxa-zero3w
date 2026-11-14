@@ -33,6 +33,16 @@ if [ ! -L /mnt/overlay/etc/localtime ]; then
     ln -sf /usr/share/zoneinfo/Etc/UTC /mnt/overlay/etc/localtime
 fi
 
+# Root password
+#
+# /etc is read-only, so the shipped /etc/shadow can never be changed in place.
+# Keep a copy on the overlay and bind it back over /etc/shadow, so a password
+# set with "wifi-setup --ssh-password" survives reboots and OS updates.
+if [ ! -f /mnt/overlay/etc/shadow ]; then
+    cp -fp /etc/shadow /mnt/overlay/etc/shadow
+    chmod 600 /mnt/overlay/etc/shadow
+fi
+
 # Console
 if [ ! -f /mnt/overlay/etc/vconsole.conf ]; then
     echo "KEYMAP=us" > /mnt/overlay/etc/vconsole.conf
