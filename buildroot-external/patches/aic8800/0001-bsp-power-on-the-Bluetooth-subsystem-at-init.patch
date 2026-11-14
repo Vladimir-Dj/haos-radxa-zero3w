@@ -1,0 +1,29 @@
+From: HAOS Radxa ZERO 3W fork
+Subject: [PATCH] bsp: power on the Bluetooth subsystem at init
+
+The AIC8800 Bluetooth core only answers on its UART once the BT firmware
+(fw_adid / fw_patch / fw_patch_table) has been pushed to it over SDIO.
+That push is what aicbsp_set_subsys(AIC_BLUETOOTH, AIC_PWR_ON) does.
+
+Upstream only performs it when the module is built with
+CONFIG_PLATFORM_ROCKCHIP, which also drags in -DANDROID_PLATFORM and a set
+of hard-coded toolchain paths from the upstream author workstation.  We
+build with the portable CONFIG_PLATFORM_UBUNTU profile instead, so the
+call is compiled out and Bluetooth stays dark even though the hardware and
+the device tree are both fine.
+
+Drop the guard.  On a board without a BT core the subsystem power request
+simply fails and WiFi is unaffected.
+
+--- a/src/SDIO/driver_fw/driver/aic8800/aic8800_bsp/aic_bsp_main.c
++++ b/src/SDIO/driver_fw/driver/aic8800/aic8800_bsp/aic_bsp_main.c
+@@ -440,9 +440,7 @@
+ 	}
+ 
+ 	mutex_init(&aicbsp_power_lock);
+-#if defined CONFIG_PLATFORM_ROCKCHIP || defined CONFIG_PLATFORM_ROCKCHIP2
+ 	aicbsp_set_subsys(AIC_BLUETOOTH, AIC_PWR_ON);
+-#endif
+ 	return 0;
+ }
+ 
