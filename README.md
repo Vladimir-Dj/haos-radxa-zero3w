@@ -66,6 +66,14 @@ keyboard are required** - that is the whole point of the `wifi-setup` work.
 5. **Boot it.** Insert the card, power on. Give it a few minutes.
 6. **Open Home Assistant** at `http://<board-ip>` - **port 80, not 8123** on
    this install. Find the address in your router's lease list, or over SSH.
+
+   > The board currently in service does not answer there: it was switched to
+   > **HTTPS on port 443** with a self-signed certificate, so it is reached at
+   > `https://192.168.5.51`. That is Home Assistant configuration rather than
+   > part of the image, so a fresh card starts on plain HTTP again - and a
+   > restored backup brings HTTPS back with it. Details, and how to change or
+   > regenerate it, are in
+   > [the changes document](Documentation/radxa-zero3w-changes.md#outside-this-repository).
 7. **SSH** reaches the host shell on port **22222**:
    `ssh -i <your-key> -p 22222 root@<board-ip>`. That is the OS shell, not the
    `ha >` CLI.
@@ -106,6 +114,10 @@ Flash and configure the card as in section 1, boot, then at the Home Assistant
 onboarding screen choose to restore from a backup and upload the `.tar`. If
 you have already onboarded, use Settings > System > Backups > upload instead.
 Add-ons, integrations and configuration come back with it.
+
+A full backup also carries `.storage/http` and the `ssl` folder, so the HTTPS
+settings and the certificate come back too - meaning the restored board will
+again answer on `https://` and port 443, not on plain HTTP.
 
 ## 3. Build a new image
 
