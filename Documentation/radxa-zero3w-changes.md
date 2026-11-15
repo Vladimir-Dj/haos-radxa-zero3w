@@ -14,6 +14,66 @@ image for it. The closest official board is ODROID-M1S, the same SoC, so
 `buildroot-external/board/radxa/zero3w/sync-defconfig.sh`, which runs at the
 start of every CI build.
 
+## Where this fork sits, and why commit hashes here go stale
+
+**Base: upstream tag `18.4`, with the fork's own commits on top.** Nothing else
+in git records this, so keep it current in this line whenever the fork is
+rebased. To confirm it at any time: `git describe --tags --abbrev=0`, and
+`git rev-list --count 18.4..HEAD` for the number of fork commits.
+
+**The commit hashes quoted throughout this file do not survive a rebase.**
+`git rebase --onto` rewrites every fork commit, so after the first upstream
+update every SHA below is dangling. The commit *subjects* do survive and are
+written to be searchable - `git log --oneline 18.4..HEAD` finds any change
+named here. Before rebasing, tag the current tip so the old history stays
+reachable:
+
+```sh
+git tag -a pre-rebase-18.4 -m "fork tip before rebasing onto the next release"
+```
+
+## Every file this fork touches
+
+38 files. The eleven marked **shared** also exist upstream, so they conflict on
+rebases and are where silent breakage comes from. The rest are new files and
+cannot conflict.
+
+| File | Shared? | What it is for |
+|---|---|---|
+| `board/radxa/zero3w/*` (12 files) | new | The board itself: `meta`, `cmdline.txt` (carries the governor), `kernel.config`, `haos-hook.sh`, `uboot-boot.ush`, `uboot.config`, the two `image-spl-*`/`partition-spl-*` configs, `sync-defconfig.sh`, and an intentionally empty `boot-env.txt` (U-Boot needs the file to exist; it has nothing to say for this board). |
+| `board/radxa/zero3w/patches/linux/0001-…-TRNG-…` | new | Enables the Rockchip true random number generator on the board. Came with the original board commit; unrelated to WiFi. |
+| `board/radxa/zero3w/patches/linux/0002-…-antenna-…` | new | The antenna GPIO hog. See §1b - without it every scan returns zero networks. |
+| `configs/radxa_zero3w_defconfig` | new | **Generated**, never hand-edited. `sync-defconfig.sh` rewrites it from `odroid_m1s_defconfig`. |
+| `package/aic8800/*` | new | The out-of-tree WiFi/BT driver package. |
+| `patches/aic8800/0001-bsp-power-…` | new | Powers the Bluetooth core. See §2a. |
+| `patches/network-manager/0002-…-no-SAE-…` | new | The `!is_ap` fix. See §1c. |
+| `rootfs-overlay/.../wifi-setup.service`, `usr/sbin/wifi-setup` | new | First-boot WiFi and SSH from the boot partition. |
+| `rootfs-overlay/.../aic8800-bt.service` | new | `btattach`, and the `modprobe hidp` that goes with it. |
+| `rootfs-overlay/.../etc-shadow.mount`, `usr/sbin/haos-dropbear` | new | Persistent root password and the dropbear wrapper. |
+| `.github/workflows/build-radxa-zero3w.yaml` | new | The image build. |
+| `.github/workflows/test-aic8800.yaml` | new | Compiles **only** the aic8800 driver against the HAOS kernel, ~15 min. Run this first after an upstream kernel bump. |
+| `Documentation/*` | new | This file, the board reference, and `tools/gencert.py`. |
+| **`busybox.config`** | **shared** | Turns on `CONFIG_CRYPTPW`, `CONFIG_USE_BB_CRYPT`, `CONFIG_USE_BB_CRYPT_SHA` and `sha512` as the default algorithm. **`wifi-setup --ssh-password` needs `cryptpw` and busybox does not ship it by default.** Lose this hunk and the image still builds and boots - only password SSH quietly stops working. Checklist item 7 is what catches it. |
+| **`rootfs-overlay/.../system-preset/70-haos.preset`** | **shared** | Adds `enable wifi-setup.service`, `enable etc-shadow.mount`, `enable aic8800-bt.service`. **This is the most dangerous file in the fork.** The services exist in the image but are not enabled without these three lines, so losing them produces an image that builds green, boots, and has **no WiFi at all** - on a board with no Ethernet port. The only way back in is the 1500000-baud serial console. Check this file after every rebase, before anything else. |
+| **`rootfs-overlay/usr/libexec/haos-overlay`** | **shared** | Seeds `/mnt/overlay/etc/shadow`. `etc-shadow.mount` is useless without it - the two are one mechanism. |
+| **`rootfs-overlay/.../dropbear.service.d/haos.conf`** | **shared** | Points dropbear at `haos-dropbear`, adds `RequiresMountsFor`, and carries the two `\|Condition` lines (see §3b for why the `\|` prefix matters). |
+| **`buildroot-external/Config.in`** | **shared** | One line registering the aic8800 package. Lose it and the driver silently is not built. |
+| **`.github/workflows/build.yaml`, `build-pr.yaml`, `release-drafter.yml`, `stale.yml`** | **shared** | Each gated with `if: github.repository == 'home-assistant/operating-system'` so upstream's automation does not run in the fork. Harmless if lost, noisy. |
+| **`.github/workflows/matrix.json`** | **shared** | Registers `radxa-zero3w` in upstream's board matrix. |
+| **`README.md`** | **shared** | The fork section at the top. Conflicts on most rebases; keep the fork block and take upstream's body. |
+
+The out-of-tree driver is pinned in `package/aic8800/aic8800.mk`:
+
+```make
+AIC8800_VERSION = 5562c254b0231be34588dc608ec28c4f1d613285
+```
+
+a bare commit of `radxa-pkg/aic8800`. Upstream HAOS bumps the kernel between
+releases, so **this is the single most likely thing to break on a rebase**. If
+the module stops compiling, look for a newer commit of that repository before
+touching anything else, and test it with `test-aic8800.yaml` rather than a full
+build.
+
 ## The baseline: Friday 13 Nov
 
 Commits `09ea2e764`, `80051526d`, `e07f903bb`, `a2a824bc5` added the board and
@@ -58,7 +118,7 @@ Radxa's vendor device tree carries a `/board-antenna` node - a
 antenna**. Mainline `rk3566-radxa-zero-3w.dts` has no such node, so the pin
 floats and the chip transmits into the empty external U.FL socket.
 
-**Fix:** `patches/linux/0002-arm64-dts-rockchip-Select-on-board-WiFi-antenna-on-Radxa-ZERO-3W.patch`
+**Fix:** `buildroot-external/board/radxa/zero3w/patches/linux/0002-arm64-dts-rockchip-Select-on-board-WiFi-antenna-on-Radxa-ZERO-3W.patch`
 adds a GPIO hog holding the pin low. Proven first by hand on the running board -
 `echo 0 > /sys/class/gpio/gpio123/value` made six networks appear instantly -
 and only then written as the patch.
@@ -92,7 +152,7 @@ says not to do this when PMF is disabled, but `!is_ap` is true for every
 station, so SAE is always offered and the PMF setting only ever matters in AP
 mode. That is why no amount of PMF configuration helped.
 
-**Fix:** `patches/network-manager/0002-supplicant-no-SAE-on-wpa-psk-station.patch`
+**Fix:** `buildroot-external/patches/network-manager/0002-supplicant-no-SAE-on-wpa-psk-station.patch`
 requires `is_ap` in that guard.
 
 One unrelated trap found alongside, on the router rather than the board: on
@@ -112,7 +172,7 @@ boot, which looks like success but is only the combined firmware upload. The
 decisive line is `aicbsp: aicbsp_set_subsys, subsys: AIC_WIFI, state to: 1` with
 **no `AIC_BLUETOOTH` counterpart** - the BT subsystem is never powered on.
 
-**Fix:** `patches/aic8800/0001-bsp-power-on-the-Bluetooth-subsystem-at-init.patch`
+**Fix:** `buildroot-external/patches/aic8800/0001-bsp-power-on-the-Bluetooth-subsystem-at-init.patch`
 removes a `CONFIG_PLATFORM_ROCKCHIP` guard so `aic8800_bsp` powers the BT core
 and pushes its firmware over SDIO. Confirmed by `AIC_BLUETOOTH` then appearing
 in the same log.
@@ -267,7 +327,8 @@ Then, with no keyboard and no monitor attached, the board should:
 
 1. boot and select the on-board WiFi antenna
 2. load the AIC8800 driver and associate with the WPA2 network
-3. take an address over DHCP and answer on port 80 with Home Assistant onboarding
+3. take an address over DHCP and answer on port 80 with Home Assistant
+   onboarding (443 instead, if you restore a backup rather than onboarding)
 4. accept SSH on port 22222 with your key, and with the password if you set one
 5. bring up `hci0`, with `hidp` already loaded
 6. run all four cores on `schedutil`
@@ -321,12 +382,16 @@ grep -c '^root:[$]6[$]' /etc/shadow
 
 # 8. Home Assistant itself
 ha core info | grep -E 'version|port'
-#   port: 80   - NOT 8123 on this install
+#   port: 80 on a FRESHLY onboarded card - not 8123.
+#   port: 443 once a backup has been restored, because the backup carries
+#   .storage/http and the certificate. Both are correct; which one you get
+#   depends on whether you restored. See 'Outside this repository'.
 ```
 
 Three notes that have cost time before:
 
-* Home Assistant on this install serves on **port 80**, not 8123.
+* Home Assistant serves on **port 80** after a fresh onboarding, and on
+  **443 over HTTPS** after a backup restore - never 8123.
 * Right after a reboot, `ha apps info <slug>` reporting `state: stopped` is
   normal. The Supervisor starts add-ons only in its `application` phase, which
   comes *after* Core reaches `RUNNING`.
@@ -345,6 +410,11 @@ partition, which a fresh flash erases, and none of it can be baked in:
 * installed add-ons and their configuration, including Music Assistant's
   Spotify login and its volume-normalization setting
 * `automations.yaml`
+
+Everything in **Outside this repository** below is also not in the image and
+not in a Home Assistant backup either: the Cloudflare API token and its
+scoping, the MikroTik DNS and firewall changes, and the Shelly webhooks. Those
+have to be redone by hand from that section.
 
 **So take a Home Assistant backup and copy it off the board before reflashing.**
 A backup sitting on the same SD card is worthless the moment you rewrite that
