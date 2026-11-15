@@ -269,7 +269,7 @@ with Windows git against the UNC path instead:
 git -c safe.directory=* -C "\\\\wsl.localhost\\Debian\\home\\administrator\\haos" push origin radxa-zero3w
 ```
 
-**The fork is currently based on upstream tag `18.4`.** Confirm with
+**The fork is currently based on upstream tag `18.5`.** Confirm with
 `git describe --tags --abbrev=0`. Keep that sentence, and the one in
 `Documentation/radxa-zero3w-changes.md`, updated when you rebase - nothing else
 records it.
@@ -280,12 +280,12 @@ Then, for a new upstream release `X.Y`:
 cd ~/haos
 git checkout radxa-zero3w
 git status --porcelain          # must be empty before starting
-git tag -a pre-rebase-18.4 -m "fork tip before rebasing onto X.Y"
+git tag -a pre-rebase-18.5 -m "fork tip before rebasing onto X.Y"
 git fetch upstream --tags
-git rebase --onto X.Y 18.4 radxa-zero3w
+git rebase --onto X.Y 18.5 radxa-zero3w
 ```
 
-`18.4` there is the **current** base, not the new one. Getting it wrong
+`18.5` there is the **current** base, not the new one. Getting it wrong
 replays the wrong range of commits. The tag in the line above keeps the old
 history reachable afterwards, which matters because the rebase rewrites every
 commit hash that `radxa-zero3w-changes.md` quotes.

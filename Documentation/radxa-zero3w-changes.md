@@ -16,10 +16,16 @@ start of every CI build.
 
 ## Where this fork sits, and why commit hashes here go stale
 
-**Base: upstream tag `18.4`, with the fork's own commits on top.** Nothing else
+**Base: upstream tag `18.5`, with the fork's own commits on top.** Nothing else
 in git records this, so keep it current in this line whenever the fork is
 rebased. To confirm it at any time: `git describe --tags --abbrev=0`, and
-`git rev-list --count 18.4..HEAD` for the number of fork commits.
+`git rev-list --count 18.5..HEAD` for the number of fork commits.
+
+Rebased from 18.4 to 18.5 on 15 Nov 2026. That rebase replayed all 23 commits
+with no conflicts, and `sync-defconfig.sh` reported the defconfig already in
+sync - 18.5 changed neither the ODROID-M1S defconfig nor the kernel version
+(6.18.58 in both), which is why nothing here needed adjusting. The previous
+tip is kept as the tag `pre-rebase-18.4`.
 
 **The commit hashes quoted throughout this file do not survive a rebase.**
 `git rebase --onto` rewrites every fork commit, so after the first upstream
