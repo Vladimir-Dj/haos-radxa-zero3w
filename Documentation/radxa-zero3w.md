@@ -31,6 +31,11 @@ ha > login
 # wifi-setup
 ```
 
+That `ha >` prompt is the Supervisor CLI on the **serial console** (UART2 on
+the GPIO header, 1500000 baud) or on a monitor and keyboard; `login` drops from
+it into the host shell. Over SSH on port 22222 you are already in that host
+shell and root, so just run `wifi-setup` directly - no `login` needed.
+
 The primary network gets `autoconnect-priority=100` and the backup `50`, so the
 board prefers the primary and falls back on its own.
 
@@ -125,11 +130,14 @@ whenever `CONFIG/network/` exists, and it *removes* an installed SSH key when a
   (`cpufreq.default_governor=schedutil` in `cmdline.txt`). Upstream HAOS builds
   the kernel with `CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE`, which pins all four
   cores at 1416 MHz permanently. Measured on an idle board, `schedutil` spends
-  92 % of the time at 408 MHz and settles around 54 C, while still reaching full
+  most of its time at 408 MHz and settles around 50 C, while still reaching full
   clock within milliseconds when work arrives; the first passive thermal trip
   point is 70 C. Setting this on the command line rather than from a
   `tmpfiles.d` rule avoids a race - the governor is in place when the cpufreq
   driver registers the policy, instead of some time after userspace has started.
+  The board `kernel.config` deliberately still says `PERFORMANCE`: the command
+  line overrides it at boot, and leaving the config as the synced defconfig
+  generates it avoids a needless diff. That mismatch is intentional, not a bug.
   `cmdline.txt` lives on the `hassos-boot` partition, which **is** a RAUC slot
   (`[slot.boot.0]`), but an OS update does **not** overwrite it.
   `install_boot()` in `buildroot-external/ota/rauc-hook` copies every `*.txt`
