@@ -33,13 +33,15 @@ endef
 AIC8800_POST_PATCH_HOOKS += AIC8800_APPLY_DEBIAN_PATCHES
 
 # The driver reads firmware directly from /lib/firmware/aic8800_fw/SDIO/<chip>
+# No modules-load.d file is installed: HAOS deletes /usr/lib/modules-load.d in
+# scripts/rootfs-layer.sh, so anything put there is dropped during the build.
+# None is needed - udev autoloads aic8800_bsp/aic8800_fdrv from the SDIO
+# modalias, btattach pulls in hci_uart, and aic8800-bt.service modprobes hidp.
 define AIC8800_INSTALL_FIRMWARE
 	mkdir -p $(TARGET_DIR)/lib/firmware/aic8800_fw/SDIO
 	for d in $(@D)/src/SDIO/driver_fw/fw/*/; do \
 		cp -a "$$d" $(TARGET_DIR)/lib/firmware/aic8800_fw/SDIO/ || exit 1; \
 	done
-	$(INSTALL) -D -m 0644 $(AIC8800_PKGDIR)/aic8800.conf \
-		$(TARGET_DIR)/usr/lib/modules-load.d/aic8800.conf
 endef
 AIC8800_POST_INSTALL_TARGET_HOOKS += AIC8800_INSTALL_FIRMWARE
 
