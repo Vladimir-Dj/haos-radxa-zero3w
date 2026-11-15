@@ -30,12 +30,12 @@ tip is kept as the tag `pre-rebase-18.4`.
 **The commit hashes quoted throughout this file do not survive a rebase.**
 `git rebase --onto` rewrites every fork commit, so after the first upstream
 update every SHA below is dangling. The commit *subjects* do survive and are
-written to be searchable - `git log --oneline 18.4..HEAD` finds any change
+written to be searchable - `git log --oneline 18.5..HEAD` finds any change
 named here. Before rebasing, tag the current tip so the old history stays
 reachable:
 
 ```sh
-git tag -a pre-rebase-18.4 -m "fork tip before rebasing onto the next release"
+git tag -a pre-rebase-18.5 -m "fork tip before rebasing onto the next release"
 ```
 
 ## Every file this fork touches
@@ -264,6 +264,15 @@ has created `hci0`. An `ExecStartPre` in that same service is therefore always
 early enough. The `-` prefix means a missing `hidp` still leaves plain
 Bluetooth working.
 
+**Verified on hardware on 15 Nov 2026, with the 18.5 install.** Until then the
+service was only *believed* to load the module, because a hand-written
+`/etc/modules-load.d/hidp.conf` on the overlay partition was loading it as well
+and masking the question. That file was moved to
+`/mnt/data/hidp.conf.disabled-for-test`, the board was rebooted into the new
+slot, and `hidp` came up anyway - so the `ExecStartPre` is doing the work and
+the overlay file is redundant. It has been left disabled. **If you are restoring
+this board from scratch, do not recreate that file**; the image handles it.
+
 The rest of the old conf was redundant anyway: udev autoloads `aic8800_bsp` and
 `aic8800_fdrv` from the SDIO modalias, and `btattach` pulls in `hci_uart` on
 demand. The file was deleted along with its install line.
@@ -448,7 +457,7 @@ card. With a backup, a fresh install is: flash, drop `wifi.conf` and
 
 An OS update over RAUC is a different matter: it leaves the data partition
 untouched, so add-ons, integrations and configuration all survive. That has been
-exercised three times now, in both slots.
+exercised four times now, in both slots.
 
 ## Outside this repository
 

@@ -34,14 +34,14 @@ keyboard are required** - that is the whole point of the `wifi-setup` work.
    <https://github.com/Vladimir-Dj/haos-radxa-zero3w>. Take the image from a
    GitHub release, or from the artifacts of a green **Build Radxa ZERO 3W** run
    under Actions. The file is `haos_radxa-zero3w-<version>.img.xz`, where
-   `<version>` is upstream's, currently `18.4`. Artifact downloads need a
+   `<version>` is upstream's, currently `18.5`. Artifact downloads need a
    GitHub login, and **artifacts are deleted after 30 days** - after that only
    published releases still have the image.
 2. **Check it.** The artifact also contains `SHA256SUMS.radxa-zero3w`. On
    Windows, where you will be flashing from:
 
    ```powershell
-   Get-FileHash .\haos_radxa-zero3w-18.4.img.xz -Algorithm SHA256
+   Get-FileHash .\haos_radxa-zero3w-18.5.img.xz -Algorithm SHA256
    ```
 
    and compare the hash with the matching line of that file by eye.
@@ -359,7 +359,7 @@ the workflow), so a release is the only durable copy of an image.
 
 One naming trap. The image and bundle are named from
 `buildroot-external/meta`, which carries **upstream's** version - so they are
-`haos_radxa-zero3w-18.4.img.xz` and `.raucb` regardless of the release tag. A
+`haos_radxa-zero3w-18.5.img.xz` and `.raucb` regardless of the release tag. A
 second fork build of the same upstream release produces a file with an
 identical name and an identical internal version, and `rauc info` cannot tell
 them apart. Keep `SHA256SUMS.radxa-zero3w` next to any image you store, and
