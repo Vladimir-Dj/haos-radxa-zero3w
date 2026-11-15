@@ -2,7 +2,10 @@
 Description=Attach the AIC8800 Bluetooth controller on uart1
 Documentation=https://github.com/Vladimir-Dj/haos-radxa-zero3w
 # aic8800_bsp must have powered the Bluetooth subsystem and pushed its firmware
-# over SDIO first; it is loaded by systemd-modules-load from modules-load.d.
+# over SDIO first. udev autoloads it from the SDIO modalias; the image cannot
+# ship a modules-load.d file, because rootfs-layer.sh deletes
+# /usr/lib/modules-load.d during the rootfs build. Should btattach still win
+# the race, Restart=on-failure retries until the chip answers.
 After=systemd-modules-load.service
 ConditionPathExists=/dev/ttyS1
 
@@ -14,7 +17,16 @@ ConditionPathExists=/dev/ttyS1
 # there is no baud rate to negotiate. Declaring the chip in the device tree as
 # a bcm43438 instead - the way Radxa's vendor tree does - makes mainline load
 # btbcm, which opens with the Broadcom vendor command 0xfc18 and times out.
+#
+# hidp carries Bluetooth HID (keyboards, mice). bluetoothd's input plugin
+# probes for it when it starts, and loading it afterwards leaves every HID
+# connection failing with br-connection-create-socket until bluetoothd is
+# restarted. bluetooth.target is WantedBy the hci0 device unit, so bluetoothd
+# starts only once the btattach below has created hci0 - loading hidp here is
+# therefore always early enough. Prefixed with - so that a missing hidp still
+# leaves plain Bluetooth working.
 Type=simple
+ExecStartPre=-/usr/sbin/modprobe hidp
 ExecStart=/usr/bin/btattach -B /dev/ttyS1 -P h4 -S 1500000
 Restart=on-failure
 RestartSec=5

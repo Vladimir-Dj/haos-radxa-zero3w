@@ -122,9 +122,26 @@ whenever `CONFIG/network/` exists, and it *removes* an installed SSH key when a
   point is 70 C. Setting this on the command line rather than from a
   `tmpfiles.d` rule avoids a race - the governor is in place when the cpufreq
   driver registers the policy, instead of some time after userspace has started.
-  Note that `cmdline.txt` lives on the `hassos-boot` partition, which **is** a
-  RAUC slot (`[slot.boot.0]`), so an OS update overwrites it: the change has to
-  be in the image to survive an update.
+  `cmdline.txt` lives on the `hassos-boot` partition, which **is** a RAUC slot
+  (`[slot.boot.0]`), but an OS update does **not** overwrite it.
+  `install_boot()` in `buildroot-external/ota/rauc-hook` copies every `*.txt`
+  off the partition, unpacks the new `boot.vfat`, then copies them back - boot
+  config is treated as user-editable and is preserved. The file's mtime still
+  changes, which makes it look rewritten. Two consequences: a `cmdline.txt`
+  change in the image only reaches a **freshly flashed** card, and to change the
+  command line on a running board you edit `/mnt/boot/cmdline.txt` in place (it
+  is vfat, mounted rw) - after which the same hook carries that edit through
+  every later update. Verify with `cat /proc/cmdline` and
+  `cat /sys/devices/system/cpu/cpufreq/policy0/stats/time_in_state`.
+* The image **cannot ship a `modules-load.d` file.** `fix_rootfs()` in
+  `buildroot-external/scripts/rootfs-layer.sh` deletes
+  `${TARGET_DIR}/usr/lib/modules-load.d` after the packages install, so anything
+  placed there is dropped during the build. Nothing on this board needs one:
+  udev autoloads `aic8800_bsp`/`aic8800_fdrv` from the SDIO modalias, `btattach`
+  pulls in `hci_uart` on demand, and `hidp` is loaded by `aic8800-bt.service`.
+  To load modules on an already-installed board write `/etc/modules-load.d/*.conf`
+  - that path is a bind mount from the overlay partition, so it survives reboots
+  and OS updates alike - or ship them as `CONFIG/modules/*` for `haos-config`.
 
 ## 1. One-time setup: RAUC signing key
 
