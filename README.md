@@ -67,12 +67,12 @@ keyboard are required** - that is the whole point of the `wifi-setup` work.
 6. **Open Home Assistant** at `http://<board-ip>` - **port 80, not 8123** on
    this install. Find the address in your router's lease list, or over SSH.
 
-   > The board currently in service does not answer there: it was switched to
-   > **HTTPS on port 443** with a self-signed certificate, so it is reached at
-   > `https://192.168.5.51`. That is Home Assistant configuration rather than
-   > part of the image, so a fresh card starts on plain HTTP again - and a
-   > restored backup brings HTTPS back with it. Details, and how to change or
-   > regenerate it, are in
+   > The board currently in service does not answer there: it serves **HTTPS on
+   > port 443** with a trusted Let's Encrypt certificate and is reached at
+   > `https://ha.artofme.eu`. That is Home Assistant configuration plus two
+   > router settings rather than part of the image, so a fresh card starts on
+   > plain HTTP again. How it is set up, why a DNS record alone was not enough,
+   > and how renewal works are in
    > [the changes document](Documentation/radxa-zero3w-changes.md#outside-this-repository).
 7. **SSH** reaches the host shell on port **22222**:
    `ssh -i <your-key> -p 22222 root@<board-ip>`. That is the OS shell, not the
@@ -117,7 +117,9 @@ Add-ons, integrations and configuration come back with it.
 
 A full backup also carries `.storage/http` and the `ssl` folder, so the HTTPS
 settings and the certificate come back too - meaning the restored board will
-again answer on `https://` and port 443, not on plain HTTP.
+again answer on `https://ha.artofme.eu` and port 443, not on plain HTTP. The
+name only resolves because of a static DNS entry on the router, which is not
+in the backup; see the changes document if it ever stops resolving.
 
 ## 3. Build a new image
 
