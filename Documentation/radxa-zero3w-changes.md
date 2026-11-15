@@ -341,8 +341,27 @@ Then, with no keyboard and no monitor attached, the board should:
 
 ## Acceptance checklist
 
-Run after a fresh install, over SSH on port 22222. Each line states what to
-expect; every one of these has been verified on hardware.
+**`Documentation/tools/acceptance-check.sh` runs all of this in one pass** and
+prints PASS / FAIL per item, exiting non-zero if anything failed. Run it after
+every OS update and after every fresh flash - that is the point of it
+existing, since a checklist nobody runs is worth nothing:
+
+```sh
+./Documentation/tools/acceptance-check.sh                 # read-only
+./Documentation/tools/acceptance-check.sh --with-lights   # also toggles the
+                                                          # bathroom and checks
+                                                          # that the speaker plays
+```
+
+It covers more than the list below: the hardware RNG from the TRNG patch, how
+many days the certificate has left, that the router still resolves the name
+while AdGuard still filters, and that both Shellys still hold their webhooks.
+Addresses are overridable with environment variables (`BOARD`, `KEY`, `NAME`,
+`ROUTER`, ...) so it survives a change of IP.
+
+The individual commands below are what it runs, kept here because the expected
+output is the explanation. Run after a fresh install, over SSH on port 22222;
+every one of these has been verified on hardware.
 
 ```sh
 # 1. Right image, right slot, and the slot was accepted

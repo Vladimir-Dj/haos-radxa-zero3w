@@ -223,6 +223,12 @@ ha os info | grep version
 rm -f /mnt/data/haos-update.raucb
 ```
 
+Then run the acceptance check from the laptop - every item, in one pass:
+
+```sh
+./Documentation/tools/acceptance-check.sh
+```
+
 **If the new image is bad.** RAUC falls back on its own only when the slot
 fails to *boot* three times. The failure that actually happens with this board
 is different: the system boots fine and something above it is broken - WiFi
