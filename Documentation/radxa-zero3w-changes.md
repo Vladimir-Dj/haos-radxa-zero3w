@@ -360,95 +360,127 @@ exercised three times now, in both slots.
 Three things that are part of the working house but deliberately not part of
 the image, recorded here so the reasoning is not lost:
 
-* **Home Assistant serves HTTPS with a self-signed certificate, since
-  15 Nov 2026.** This is Home Assistant configuration on the data partition,
-  not part of the image. A freshly flashed card comes back on plain HTTP;
-  restoring a backup brings HTTPS back with it, because a full backup contains
-  both `.storage/http` and the `ssl` folder.
+* **Home Assistant serves HTTPS with a trusted Let's Encrypt certificate for
+  `ha.artofme.eu`, since 15 Nov 2026.** None of this is in the image - it is
+  Home Assistant configuration plus two router settings - but it took three
+  separate obstacles to get working, and each one is worth knowing about.
 
   | | |
   |---|---|
-  | URL | `https://192.168.5.51` - port 443, so no port in the URL |
-  | Certificate | `/ssl/fullchain.pem` |
-  | Key | `/ssl/privkey.pem`, mode 600 |
-  | Covers | `192.168.5.51`, `homeassistant.local`, `homeassistant`, `127.0.0.1` |
-  | Valid until | November 2036, RSA 2048 / SHA-256 |
-  | Negotiated | TLS 1.3, `TLS_AES_256_GCM_SHA384`, SSL profile `intermediate_v6` |
+  | URL | `https://ha.artofme.eu` - port 443 |
+  | Certificate | `/ssl/fullchain.pem`, key `/ssl/privkey.pem` |
+  | Issuer | Let's Encrypt, ECDSA, ~90 days |
+  | Challenge | DNS-01 through the Cloudflare API - **no port is opened** |
+  | Add-on | `core_letsencrypt`, `challenge: dns`, `provider: dns-cloudflare` |
+  | Verified | `curl` with no `-k` returns `ssl_verify_result=0` |
 
-  Plain HTTP on port 80 is gone - the port is closed, not redirected.
+  A self-signed certificate was set up first and then replaced. Its files are
+  kept as `/ssl/fullchain.pem.selfsigned` and `/ssl/privkey.pem.selfsigned`, and
+  `Documentation/tools/gencert.py` still generates that kind if it is ever
+  needed again. The trusted certificate removed the one real drawback of the
+  self-signed one: **a Chromecast cannot accept a certificate**, so TTS and
+  local media pushed from Home Assistant to a Cast device failed. That now
+  works.
 
-  **Do not configure this in `configuration.yaml`.** That was tried first and
-  silently does nothing. Since the HTTP settings were migrated to the UI, a
-  `http:` block in YAML is ignored, and Home Assistant raises the repair
-  *"HTTP YAML configuration is ignored after migration - this stops working in
-  version 2027.2.0"*. The migration is recorded as
-  `"yaml_migration_done": true` in `.storage/http`, and on this install it
-  happened on 14 Nov 2026, before the block was ever added. The live settings
-  are now in `.storage/http`, which looks like this:
+  **The Cloudflare API token is for the add-on, not for a person.** The add-on
+  runs on the board and calls Cloudflare itself at every renewal, unattended, so
+  a connector or a browser session cannot stand in for it. Scope it narrowly:
+  **Zone:DNS:Edit plus Zone:Zone:Read, on that one zone only**, no expiration.
+  Both permissions are needed - DNS:Edit alone fails, because certbot first has
+  to look up the zone id. No expiration is deliberate: renewal is unattended,
+  and an expired token would fail silently until the certificate itself ran out.
 
-  ```json
-  { "data": { "stable": { "server_port": 443,
-                          "ssl_certificate": "/ssl/fullchain.pem",
-                          "ssl_key": "/ssl/privkey.pem",
-                          "ssl_profile": "intermediate_v6", ... },
-              "pending": null,
-              "yaml_migration_done": true } }
+  **Renewal is not automatic.** The add-on is a one-shot: it runs certbot and
+  exits. The automation `letsencrypt_renew_certificate` starts it on the first
+  of each month and then restarts Core. The restart is the part that is easy to
+  forget - certbot writes the new files, but Home Assistant read the certificate
+  into memory when its web server started and serves the old one until it
+  restarts. certbot only renews inside the last 30 days, so running monthly is
+  idempotent; most months it checks and does nothing.
+
+  ### Why a DNS record was not enough
+
+  The certificate only needs the TXT record that the add-on creates and deletes
+  by itself. An `A` record is needed separately, so that the name resolves to
+  the board. `ha.artofme.eu A 192.168.5.51`, **DNS only** - Cloudflare detects
+  the private address and labels it `DNS only - reserved IP`, refusing to proxy
+  it, which is the wanted behaviour.
+
+  That record alone did not work, and the reason is worth remembering:
+  **AdGuard DNS refuses to return a private address for a public domain.** That
+  is DNS rebinding protection, a real security feature, not a fault. The router
+  was handing out `94.140.14.14` / `94.140.15.15` to every device, so nothing in
+  the house could resolve the name. Measured at the time:
+
+  | Resolver | `ha.artofme.eu` | `doubleclick.net` |
+  |---|---|---|
+  | AdGuard `94.140.14.14` | NXDOMAIN | `0.0.0.0` (blocked) |
+  | ISP `212.39.90.52` | 192.168.5.51 | three real addresses |
+  | Router `192.168.5.1` (after the work below) | 192.168.5.51 | `::` (still blocked) |
+
+  Dropping AdGuard would have fixed resolution in one step and was rejected on
+  purpose: it filters ads and trackers for every device in the house, including
+  the televisions, where no blocker can be installed. The router keeps that
+  intact and overrides exactly one name.
+
+  ### The MikroTik changes
+
+  Three settings on the hAP ac (RouterOS 6.48.6, `192.168.5.1`):
+
+  1. **IP > DNS > Static**: `ha.artofme.eu` -> `192.168.5.51`.
+  2. **IP > DNS**: `Servers` = `94.140.14.14`, `94.140.15.15` and
+     **Allow Remote Requests** on. Setting the upstream servers explicitly is
+     what preserves AdGuard filtering - without it the router would have fallen
+     back to its dynamic ISP servers (`212.39.90.52/53`), which filter nothing,
+     and pointing the house at the router would have silently disabled ad
+     blocking everywhere.
+  3. **IP > DHCP Server > Networks**: `DNS Servers` = `192.168.5.1`, so clients
+     ask the router instead of AdGuard directly.
+
+  **A missing firewall rule had to be fixed first.** After step 2 the router
+  answered the static entry but timed out on everything else. The filter list
+  had no rule accepting `established,related`, and rule `drop input !LAN` at the
+  end discarded the replies to the router's *own* queries. It had never shown up
+  because the router had never needed to resolve anything for itself - the
+  clients were talking to AdGuard directly. Added as an `input` chain rule,
+  `action=accept connection-state=established,related`, placed **above** the
+  drop. That is the canonical first rule of a stateful firewall and its absence
+  was a gap, not a deliberate choice.
+
+  ### internal_url, and the repair that complains about it
+
+  Settings > System > Network > Home Assistant URL > Local network must be set
+  to `https://ha.artofme.eu` with *Automatic* turned off. With a certificate
+  configured and no URL set, Home Assistant raises the repair
+  `ssl_configured_without_configured_urls`. The condition, in
+  `components/http/__init__.py`, is:
+
+  ```python
+  ssl_certificate is not None
+  and (hass.config.external_url or hass.config.internal_url) is None
   ```
 
-  **The supported way to change it is Settings > System > Network > HTTP
-  server.** Set the server port, and under *SSL/TLS* the certificate and key
-  paths. Saving asks to confirm, because it restarts Home Assistant.
+  so setting the internal URL alone satisfies it - the external URL may stay
+  empty, which is right for a LAN-only setup. The check runs once, on
+  `EVENT_HOMEASSISTANT_START`, so the repair clears on the next restart rather
+  than immediately. The entry lingers in `.storage/repairs.issue_registry` as
+  history even after the UI stops showing it; trust the UI, not that file.
 
-  That dialog matters: clicking *Save* only opens it, and the change is not
-  written until *Save and restart* is clicked. Worth knowing, because the UI
-  looks saved either way.
+  ### Two UI traps in this flow
 
-  There is a safety net, and it is visible in the file above. A new setting is
-  written to `pending`, not to `stable`. If Home Assistant is not confirmed
-  reachable on the new port **within five minutes**, `pending` is discarded and
-  it falls back to `stable`. Confirmation comes from a browser actually loading
-  the UI over the new port - a successful `curl` is not enough. So with a
-  self-signed certificate you must open the new URL and accept the warning
-  inside those five minutes, or the change reverts itself. Once confirmed,
-  `pending` becomes `null` and `stable` holds the new values.
+  Both cost time and both look like the setting simply did not save:
 
-  Every browser warns once per device, because nothing but the certificate
-  itself signed it. That is expected and is not a fault. Note that Chrome's
-  warning page is a privileged page: an extension cannot click through it, it
-  has to be done by hand.
+  * Under **HTTP server**, *Save* only opens a confirmation dialog. Nothing is
+    written until **Save and restart** is clicked.
+  * Under **Home Assistant URL**, the orange "Invalid local network URL" warning
+    disappears the moment a valid URL is typed, and the card shrinks - so the
+    *Save* button moves up by about 90 px. A click aimed at where it used to be
+    lands on empty space and nothing happens, silently.
 
-  **The catch, and it is a real one: a Chromecast cannot accept a
-  certificate.** Text-to-speech announcements or local media pushed from Home
-  Assistant to a Cast device require that device to fetch the file from Home
-  Assistant, and it will refuse a self-signed certificate. Controlling Cast
-  devices over the local API is unaffected, and Music Assistant is unaffected
-  too, because it streams from its own port rather than through Home Assistant.
-  If this ever becomes a problem the fix is **not** a different certificate: it
-  is an NGINX proxy add-on terminating TLS on 443 while Home Assistant stays on
-  plain HTTP for internal consumers like Cast.
-
-  **Regenerating the certificate** - for a new IP address, or when 2036 comes
-  around. The host has no `openssl` binary at all, so the `cryptography` module
-  inside the `homeassistant` container is used. `/ssl` is mounted **read-only**
-  in that container and `docker cp` out of it does not work either, so generate
-  into `/config`, which is writable, and move the files on the host:
-
-  ```sh
-  # gencert.py builds an x509 certificate with the cryptography module and
-  # writes /config/_newcert_privkey.pem and /config/_newcert_fullchain.pem
-  cat gencert.py | ssh -p 22222 root@<board> 'docker exec -i homeassistant python3 -'
-  ssh -p 22222 root@<board> '
-    cd /mnt/data/supervisor/homeassistant &&
-    mv -f _newcert_fullchain.pem /mnt/data/supervisor/ssl/fullchain.pem &&
-    mv -f _newcert_privkey.pem  /mnt/data/supervisor/ssl/privkey.pem &&
-    chmod 644 /mnt/data/supervisor/ssl/fullchain.pem &&
-    chmod 600 /mnt/data/supervisor/ssl/privkey.pem'
-  ```
-
-  Then restart Home Assistant from the UI. Modern browsers reject a certificate
-  that names an IP address only in the Common Name, so the IP has to be a
-  `SubjectAlternativeName` entry - put every name and address the board will be
-  reached by in the SAN list.
+  There is also a safety net worth knowing: a changed HTTP setting is written to
+  `pending` in `.storage/http`, not to `stable`, and is **discarded after five
+  minutes** unless Home Assistant is confirmed reachable on the new port by a
+  browser actually loading the UI. A successful `curl` does not count.
 
 * **The bathroom Shelly pair is linked device-to-device, not through Home
   Assistant.** `192.168.5.10` (Shelly Plus 1, sink light, wall button) and
