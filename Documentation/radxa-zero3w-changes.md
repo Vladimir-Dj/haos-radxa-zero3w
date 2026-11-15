@@ -357,8 +357,98 @@ exercised three times now, in both slots.
 
 ## Outside this repository
 
-Two things that are part of the working house but deliberately not part of the
-image, recorded here so the reasoning is not lost:
+Three things that are part of the working house but deliberately not part of
+the image, recorded here so the reasoning is not lost:
+
+* **Home Assistant serves HTTPS with a self-signed certificate, since
+  15 Nov 2026.** This is Home Assistant configuration on the data partition,
+  not part of the image. A freshly flashed card comes back on plain HTTP;
+  restoring a backup brings HTTPS back with it, because a full backup contains
+  both `.storage/http` and the `ssl` folder.
+
+  | | |
+  |---|---|
+  | URL | `https://192.168.5.51` - port 443, so no port in the URL |
+  | Certificate | `/ssl/fullchain.pem` |
+  | Key | `/ssl/privkey.pem`, mode 600 |
+  | Covers | `192.168.5.51`, `homeassistant.local`, `homeassistant`, `127.0.0.1` |
+  | Valid until | November 2036, RSA 2048 / SHA-256 |
+  | Negotiated | TLS 1.3, `TLS_AES_256_GCM_SHA384`, SSL profile `intermediate_v6` |
+
+  Plain HTTP on port 80 is gone - the port is closed, not redirected.
+
+  **Do not configure this in `configuration.yaml`.** That was tried first and
+  silently does nothing. Since the HTTP settings were migrated to the UI, a
+  `http:` block in YAML is ignored, and Home Assistant raises the repair
+  *"HTTP YAML configuration is ignored after migration - this stops working in
+  version 2027.2.0"*. The migration is recorded as
+  `"yaml_migration_done": true` in `.storage/http`, and on this install it
+  happened on 14 Nov 2026, before the block was ever added. The live settings
+  are now in `.storage/http`, which looks like this:
+
+  ```json
+  { "data": { "stable": { "server_port": 443,
+                          "ssl_certificate": "/ssl/fullchain.pem",
+                          "ssl_key": "/ssl/privkey.pem",
+                          "ssl_profile": "intermediate_v6", ... },
+              "pending": null,
+              "yaml_migration_done": true } }
+  ```
+
+  **The supported way to change it is Settings > System > Network > HTTP
+  server.** Set the server port, and under *SSL/TLS* the certificate and key
+  paths. Saving asks to confirm, because it restarts Home Assistant.
+
+  That dialog matters: clicking *Save* only opens it, and the change is not
+  written until *Save and restart* is clicked. Worth knowing, because the UI
+  looks saved either way.
+
+  There is a safety net, and it is visible in the file above. A new setting is
+  written to `pending`, not to `stable`. If Home Assistant is not confirmed
+  reachable on the new port **within five minutes**, `pending` is discarded and
+  it falls back to `stable`. Confirmation comes from a browser actually loading
+  the UI over the new port - a successful `curl` is not enough. So with a
+  self-signed certificate you must open the new URL and accept the warning
+  inside those five minutes, or the change reverts itself. Once confirmed,
+  `pending` becomes `null` and `stable` holds the new values.
+
+  Every browser warns once per device, because nothing but the certificate
+  itself signed it. That is expected and is not a fault. Note that Chrome's
+  warning page is a privileged page: an extension cannot click through it, it
+  has to be done by hand.
+
+  **The catch, and it is a real one: a Chromecast cannot accept a
+  certificate.** Text-to-speech announcements or local media pushed from Home
+  Assistant to a Cast device require that device to fetch the file from Home
+  Assistant, and it will refuse a self-signed certificate. Controlling Cast
+  devices over the local API is unaffected, and Music Assistant is unaffected
+  too, because it streams from its own port rather than through Home Assistant.
+  If this ever becomes a problem the fix is **not** a different certificate: it
+  is an NGINX proxy add-on terminating TLS on 443 while Home Assistant stays on
+  plain HTTP for internal consumers like Cast.
+
+  **Regenerating the certificate** - for a new IP address, or when 2036 comes
+  around. The host has no `openssl` binary at all, so the `cryptography` module
+  inside the `homeassistant` container is used. `/ssl` is mounted **read-only**
+  in that container and `docker cp` out of it does not work either, so generate
+  into `/config`, which is writable, and move the files on the host:
+
+  ```sh
+  # gencert.py builds an x509 certificate with the cryptography module and
+  # writes /config/_newcert_privkey.pem and /config/_newcert_fullchain.pem
+  cat gencert.py | ssh -p 22222 root@<board> 'docker exec -i homeassistant python3 -'
+  ssh -p 22222 root@<board> '
+    cd /mnt/data/supervisor/homeassistant &&
+    mv -f _newcert_fullchain.pem /mnt/data/supervisor/ssl/fullchain.pem &&
+    mv -f _newcert_privkey.pem  /mnt/data/supervisor/ssl/privkey.pem &&
+    chmod 644 /mnt/data/supervisor/ssl/fullchain.pem &&
+    chmod 600 /mnt/data/supervisor/ssl/privkey.pem'
+  ```
+
+  Then restart Home Assistant from the UI. Modern browsers reject a certificate
+  that names an IP address only in the Common Name, so the IP has to be a
+  `SubjectAlternativeName` entry - put every name and address the board will be
+  reached by in the SAN list.
 
 * **The bathroom Shelly pair is linked device-to-device, not through Home
   Assistant.** `192.168.5.10` (Shelly Plus 1, sink light, wall button) and
