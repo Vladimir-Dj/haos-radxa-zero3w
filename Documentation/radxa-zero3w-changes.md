@@ -636,3 +636,15 @@ the image, recorded here so the reasoning is not lost:
   the device answers HTTP perfectly well. The script now also reads the last
   recorded state of every entity the two automations trigger on, and fails on
   `unavailable`.
+
+  **The router side was checked and is correct, so do not go looking there.**
+  On the MikroTik, `D4:D4:DA:EC:38:FC` has a **static** lease for
+  `192.168.5.71` - its status reads `waiting ... not blocked` and the form
+  offers *Remove* rather than *Make Static*, which is what distinguishes a
+  reservation from a dynamic lease. The wireless access list is empty, so no
+  MAC is being filtered. The device is simply absent from the registration
+  table: 31 clients are associated and this is not one of them, and almost all
+  of them show the same uptime, having reassociated together when the router
+  came back from the outage. That static lease is also what makes the
+  hard-coded `192.168.5.71` in the sink light's webhooks safe - the address
+  cannot drift.
