@@ -27,6 +27,7 @@ WITH_LIGHTS=0
 [ "${1:-}" = "--with-lights" ] && WITH_LIGHTS=1
 
 S="ssh -n -i $KEY -p $PORT -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@$BOARD"
+SNO="ssh -i $KEY -p $PORT -o StrictHostKeyChecking=no -o ConnectTimeout=10 root@$BOARD"
 pass=0; fail=0; warn=0
 
 ok()   { printf '  \033[32mPASS\033[0m  %-44s %s\n' "$1" "${2:-}"; pass=$((pass+1)); }
@@ -142,6 +143,59 @@ for ip in "$SHELLY_MAIN" "$SHELLY_SINK"; do
     || bad "webhooks present on $ip" "found ${h:-0}"
 done
 
+
+# Everything above this point talks to the devices directly over HTTP. That
+# catches a device that has fallen off the network - the 16 Nov power cut left
+# the Shelly Plus 2PM off the WiFi and the webhook probe above does report it -
+# but it says nothing about what Home Assistant can still see, and that is what
+# the automations actually depend on. A state trigger on an `unavailable` entity
+# never fires: no trigger, no action, and no error in the log either. The
+# bathroom music was dead for five days in exactly that way. An entity can also
+# go unavailable while the device answers HTTP perfectly well - an integration
+# that failed to load, a renamed or disabled entity, a Music Assistant player
+# that vanished when the add-on restarted. Those leave the checks above green.
+#
+# States come from the recorder database rather than the REST API so that this
+# needs no long-lived token. The recorder only writes on change, so a long
+# `last changed` is normal for a light nobody touched; `unavailable` is the
+# signal, not the age.
+sec "Entities the automations trigger on"
+states=$(timeout 60 $SNO 'docker exec -i homeassistant python3 -' <<'PY' 2>/dev/null
+import sqlite3, datetime
+WANT = [
+    "switch.bathroom_shellyplus2pm_d4d4daec38fc_output_0",
+    "switch.toilet_toilet_main_light",
+    "media_player.bathroom_speaker",
+    "media_player.toilet_speaker",
+    "media_player.bathroom_bathroom_speaker",
+]
+c = sqlite3.connect("file:/config/home-assistant_v2.db?mode=ro", uri=True)
+now = datetime.datetime.now().timestamp()
+for e in WANT:
+    r = c.execute(
+        "select s.state, s.last_updated_ts from states s join states_meta m"
+        " on s.metadata_id = m.metadata_id where m.entity_id = ?"
+        " order by s.last_updated_ts desc limit 1", (e,)).fetchone()
+    print("%s|%s|%d" % (e, "MISSING", 0) if r is None
+          else "%s|%s|%d" % (e, r[0], (now - r[1]) / 3600))
+PY
+)
+if [ -z "$states" ]; then
+  bad "recorder readable" "could not query the state database"
+else
+  while IFS='|' read -r ent st age; do
+    [ -z "${ent:-}" ] && continue
+    short=$(printf '%s' "${ent#*.}" | cut -c1-33)
+    case "$st" in
+      unavailable|unknown|MISSING)
+        bad "HA sees $short" "$st for ${age}h - triggers will not fire" ;;
+      *)
+        ok  "HA sees $short" "$st, last changed ${age}h ago" ;;
+    esac
+  done <<EOT
+$states
+EOT
+fi
 if [ "$WITH_LIGHTS" = "1" ]; then
   sec "End to end: light -> sink light -> music"
   curl -s -m 6 "http://$SHELLY_MAIN/rpc/Switch.Set?id=0&on=true" >/dev/null; sleep 12

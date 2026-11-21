@@ -599,3 +599,40 @@ the image, recorded here so the reasoning is not lost:
   Assistant entity it raises
   `Entity ... does not support action media_player.turn_off` on every call, and
   `continue_on_error: true` does **not** suppress that.
+* **A Shelly can keep switching the light while being invisible to Home
+  Assistant, and that failure is silent.** A power cut on **16 Nov 2026 at
+  14:30** - the board's previous boot ends there and the next begins at 14:47,
+  sixteen minutes with no power - left the bathroom Shelly Plus 2PM
+  (`192.168.5.71`, MAC `d4:d4:da:ec:38:fc`) off the WiFi. It did not come back.
+  The bathroom light went on as usual, because the PIR drives the relay inside
+  the device with no network involved, so nothing looked wrong. But
+  `switch.bathroom_shellyplus2pm_d4d4daec38fc_output_0` sat `unavailable`, and a
+  state trigger on an unavailable entity **never fires** - so the music
+  automation produced no action and no error. Five days of silence with a clean
+  log. The device-to-device webhook pair was down with it, in both directions.
+
+  How it was pinned down, in case it happens again: the speaker answered on
+  `http://192.168.5.20:8090/info`, so it was not the speaker; a sweep of all 254
+  addresses in `192.168.5.0/24` found only three Shellys and not this one; the
+  board's `/proc/net/arp` held `192.168.5.71` with `00:00:00:00:00:00`, meaning
+  it was asking and nothing answered; and `nmcli dev wifi list` showed no Shelly
+  fallback access point in the air, which rules out lost credentials, since a
+  Shelly that cannot join its network raises its own AP. Not an IP problem - the
+  device was simply not on the air.
+
+  **The cause is the power supply, not the firmware.** Dried-out electrolytic
+  capacitors in the Shelly's supply let ripple through; the WiFi radio is the
+  largest and burstiest consumer and is the first thing to drop off a sagging
+  rail, while the relay and PIR logic keep running. A power cut finishes off
+  capacitors that were already marginal. **The same fault and the same fix had
+  already happened on the toilet Shelly** - replacing the capacitors cured it
+  permanently, which is why it was the right call here too rather than a
+  power cycle.
+
+  The lesson for the checks: probing a device over HTTP is not the same as
+  asking what Home Assistant can see. The webhook probe in
+  `Documentation/tools/acceptance-check.sh` did report this one, because the
+  device was off the network entirely - but an entity can go `unavailable` while
+  the device answers HTTP perfectly well. The script now also reads the last
+  recorded state of every entity the two automations trigger on, and fails on
+  `unavailable`.
